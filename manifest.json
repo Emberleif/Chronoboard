@@ -1,0 +1,9 @@
+{
+  "id": "chronoboard",
+  "name": "Chronoboard",
+  "version": "0.6.0",
+  "minAppVersion": "1.5.0",
+  "description": "A Gantt-style timeboard for project-based time tracking across notes.",
+  "author": "Emberleif",
+  "isDesktopOnly": false
+}

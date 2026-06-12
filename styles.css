@@ -1,0 +1,1151 @@
+.chronoboard-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: var(--text-normal);
+  background: var(--background-primary);
+}
+
+.chronoboard-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.chronoboard-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chronoboard-title {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.chronoboard-subtle {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chronoboard-pill {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: var(--font-ui-smaller);
+  user-select: none;
+}
+
+.chronoboard-pill.is-active {
+  background: var(--chronoboard-highlight, var(--interactive-accent));
+  color: var(--text-on-accent);
+  border-color: var(--chronoboard-highlight, var(--interactive-accent));
+}
+
+.chronoboard-layout {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 210px;
+}
+
+.chronoboard-layout.is-left-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 210px;
+}
+
+.chronoboard-layout.is-right-collapsed {
+  grid-template-columns: 220px minmax(0, 1fr) 0;
+}
+
+.chronoboard-layout.is-left-collapsed.is-right-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+.chronoboard-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chronoboard-panel + .chronoboard-panel {
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-panel-head {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.chronoboard-task-list,
+.chronoboard-summary-list {
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+}
+
+.chronoboard-task-card,
+.chronoboard-summary-card,
+.chronoboard-add-slot,
+.chronoboard-day-task-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.chronoboard-task-card {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.chronoboard-task-card.is-selected,
+.chronoboard-summary-card.is-selected,
+.chronoboard-day-task-card.is-selected {
+  background: var(--background-primary-alt);
+  border-color: var(--chronoboard-highlight, var(--interactive-accent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 65%, white);
+}
+
+.chronoboard-task-card.has-time,
+.chronoboard-summary-card.has-time,
+.chronoboard-day-task-card.has-time {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.chronoboard-task-card.has-time.is-selected,
+.chronoboard-summary-card.has-time.is-selected,
+.chronoboard-day-task-card.has-time.is-selected {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.62);
+}
+
+.chronoboard-task-card.has-time .chronoboard-task-key,
+.chronoboard-summary-card.has-time .chronoboard-task-key,
+.chronoboard-day-task-card.has-time .chronoboard-task-key {
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.chronoboard-task-card.has-time .chronoboard-task-meta,
+.chronoboard-summary-card.has-time .chronoboard-summary-note,
+.chronoboard-summary-card.has-time .chronoboard-summary-meta,
+.chronoboard-day-task-card.has-time .chronoboard-task-meta {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.chronoboard-task-card.has-time .chronoboard-task-key,
+.chronoboard-summary-card.has-time .chronoboard-task-key,
+.chronoboard-day-task-card.has-time .chronoboard-task-key,
+.chronoboard-task-card.has-time .chronoboard-task-name,
+.chronoboard-summary-card.has-time .chronoboard-task-name,
+.chronoboard-day-task-card.has-time .chronoboard-task-name,
+.chronoboard-block .chronoboard-task-name,
+.chronoboard-block .chronoboard-block-subtitle,
+.chronoboard-block .chronoboard-block-time,
+.chronoboard-block .chronoboard-block-notes {
+  color: var(--chronoboard-custom-text, inherit);
+}
+
+.chronoboard-task-main {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chronoboard-task-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chronoboard-task-key {
+  color: var(--interactive-accent);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chronoboard-task-name {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.chronoboard-task-meta,
+.chronoboard-summary-meta,
+.chronoboard-summary-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chronoboard-status {
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  text-transform: lowercase;
+  font-weight: 600;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.chronoboard-status.is-in-progress,
+.chronoboard-block-status.is-in-progress,
+.chronoboard-day-total.is-in-progress {
+  color: #4ea0ff;
+}
+
+.chronoboard-status.is-ongoing,
+.chronoboard-block-status.is-ongoing,
+.chronoboard-day-total.is-ongoing {
+  color: #2fb859;
+}
+
+.chronoboard-status.is-on-hold,
+.chronoboard-block-status.is-on-hold,
+.chronoboard-day-total.is-on-hold {
+  color: #d29119;
+}
+
+.chronoboard-status.is-upcoming,
+.chronoboard-block-status.is-upcoming,
+.chronoboard-day-total.is-upcoming {
+  color: #9f63f2;
+}
+
+.chronoboard-task-card.has-time .chronoboard-status.is-in-progress,
+.chronoboard-day-task-card.has-time .chronoboard-status.is-in-progress {
+  color: #4ea0ff;
+}
+
+.chronoboard-task-card.has-time .chronoboard-status.is-ongoing,
+.chronoboard-day-task-card.has-time .chronoboard-status.is-ongoing {
+  color: #2fb859;
+}
+
+.chronoboard-task-card.has-time .chronoboard-status.is-on-hold,
+.chronoboard-day-task-card.has-time .chronoboard-status.is-on-hold {
+  color: #d29119;
+}
+
+.chronoboard-task-card.has-time .chronoboard-status.is-upcoming,
+.chronoboard-day-task-card.has-time .chronoboard-status.is-upcoming {
+  color: #9f63f2;
+}
+
+.chronoboard-icon-button,
+.chronoboard-nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chronoboard-icon-button:hover,
+.chronoboard-nav-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.chronoboard-collapse-button {
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chronoboard-collapse-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.chronoboard-stats-button {
+  border: 1px solid color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 55%, black);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 92%, white), var(--chronoboard-highlight, var(--interactive-accent)));
+  color: var(--text-on-accent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chronoboard-stats-button.is-active {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+}
+
+.chronoboard-add-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 12px;
+  border-style: dashed;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.chronoboard-add-slot:hover {
+  background: var(--background-modifier-hover);
+}
+
+.chronoboard-plus {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  font-size: 16px;
+  color: var(--text-normal);
+}
+
+.chronoboard-empty,
+.chronoboard-month-placeholder {
+  padding: 16px 12px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chronoboard-week-layout {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-rows: 38px minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.chronoboard-week-corner,
+.chronoboard-day-left-head {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.chronoboard-week-corner {
+  color: transparent;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+.chronoboard-week-head {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-day {
+  padding: 6px 8px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-day:first-child {
+  border-left: 0;
+}
+
+.chronoboard-day-name {
+  display: block;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+}
+
+.chronoboard-day-date {
+  display: block;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.chronoboard-day-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chronoboard-day-head-left {
+  min-width: 0;
+}
+
+.chronoboard-day-total {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chronoboard-week-hours {
+  overflow: hidden;
+  border-right: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  height: calc(var(--chronoboard-grid-bottom, 0px) + 1px);
+}
+
+.chronoboard-hour-marker-vertical {
+  min-height: 56px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4px 6px 0 6px;
+  border-top: 1px solid var(--background-modifier-border-hover);
+  color: var(--text-faint);
+  font-size: 11px;
+  height: var(--chronoboard-hour-height, 56px);
+  box-sizing: border-box;
+}
+
+.chronoboard-week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  overflow: visible;
+  border-top: 1px solid var(--background-modifier-border-hover);
+  border-left: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-week-day-column {
+  position: relative;
+  border-left: 1px solid var(--background-modifier-border);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--chronoboard-hour-height, 56px) - 1px),
+      var(--background-modifier-border-hover) calc(var(--chronoboard-hour-height, 56px) - 1px),
+      var(--background-modifier-border-hover) var(--chronoboard-hour-height, 56px)
+    );
+}
+
+.chronoboard-week-day-column:first-child {
+  border-left: 0;
+}
+
+.chronoboard-week-day-column:hover,
+.chronoboard-day-row:hover {
+  background-color: color-mix(in srgb, var(--background-modifier-hover) 80%, transparent);
+}
+
+.chronoboard-week-day-column.is-dragging,
+.chronoboard-day-row.is-dragging {
+  background-color: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+}
+
+.chronoboard-day-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: 38px minmax(0, 1fr);
+  min-height: 0;
+  flex: 1;
+}
+
+.chronoboard-day-hours-head {
+  display: grid;
+  grid-template-columns: repeat(var(--chronoboard-hour-count, 1), var(--chronoboard-day-hour-width, 84px));
+  align-items: stretch;
+  overflow: hidden;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-hour-marker-horizontal {
+  min-width: var(--chronoboard-day-hour-width, 84px);
+  padding: 8px 6px;
+  border-left: 1px solid var(--background-modifier-border);
+  color: var(--text-faint);
+  font-size: 11px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.chronoboard-hour-marker-horizontal:first-child {
+  border-left: 0;
+}
+
+.chronoboard-day-task-column {
+  overflow: auto;
+  border-right: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+  padding-bottom: 0;
+}
+
+.chronoboard-day-grid-column {
+  overflow: auto;
+  padding-top: 8px;
+  padding-bottom: 0;
+}
+
+.chronoboard-day-task-card {
+  padding: 10px 12px;
+  margin: 0 8px 8px 8px;
+  cursor: pointer;
+  height: 88px;
+  min-height: 88px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.chronoboard-day-row {
+  position: relative;
+  height: 88px;
+  margin: 0;
+  min-width: 100%;
+  border-left: 1px solid var(--background-modifier-border);
+  background:
+    repeating-linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(var(--chronoboard-day-hour-width, 84px) - 1px),
+      var(--background-modifier-border-hover) calc(var(--chronoboard-day-hour-width, 84px) - 1px),
+      var(--background-modifier-border-hover) var(--chronoboard-day-hour-width, 84px)
+    );
+}
+
+.chronoboard-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.chronoboard-color-picker-wrap {
+  margin-top: 8px;
+}
+
+.chronoboard-block,
+.chronoboard-draft-block {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  border-radius: 6px;
+  padding: 6px 8px 10px 8px;
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.chronoboard-block {
+  background: var(--interactive-accent);
+  border: 1px solid var(--interactive-accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+
+.chronoboard-block.is-selected-task {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.chronoboard-draft-block {
+  background: color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  border: 1px dashed var(--interactive-accent);
+  pointer-events: none;
+}
+
+.chronoboard-block-time {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+}
+
+.chronoboard-block-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 1px;
+}
+
+.chronoboard-block-status {
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.chronoboard-block-subtitle {
+  margin-top: 1px;
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.92;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chronoboard-block-notes {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chronoboard-resize-handle {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+  pointer-events: none;
+}
+
+.chronoboard-block:hover .chronoboard-resize-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chronoboard-resize-handle:hover {
+  background: white;
+}
+
+.chronoboard-resize-handle.is-vertical-start,
+.chronoboard-resize-handle.is-vertical-end {
+  left: 50%;
+  width: 32px;
+  height: 4px;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
+.chronoboard-resize-handle.is-vertical-start {
+  top: 2px;
+}
+
+.chronoboard-resize-handle.is-vertical-end {
+  bottom: 2px;
+}
+
+.chronoboard-resize-handle.is-horizontal-start,
+.chronoboard-resize-handle.is-horizontal-end {
+  top: 50%;
+  width: 4px;
+  height: 28px;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+.chronoboard-resize-handle.is-horizontal-start {
+  left: 2px;
+}
+
+.chronoboard-resize-handle.is-horizontal-end {
+  right: 2px;
+}
+
+.chronoboard-summary-card {
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.chronoboard-summary-head-total {
+  font-size: var(--font-ui-small);
+  font-weight: 700;
+  color: var(--text-normal);
+}
+
+.chronoboard-center-head {
+  position: relative;
+  justify-content: center;
+}
+
+.chronoboard-center-title {
+  flex: 1;
+  text-align: center;
+  font-weight: 700;
+}
+
+.chronoboard-center-title-left {
+  position: absolute;
+  left: 12px;
+  right: auto;
+  flex: 0 0 auto;
+  text-align: left;
+}
+
+.chronoboard-center-day-label {
+  font-weight: 700;
+  text-align: center;
+}
+
+.chronoboard-center-spacer {
+  position: absolute;
+  right: 12px;
+  width: 1px;
+  height: 1px;
+}
+
+.chronoboard-setting-color-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+
+.chronoboard-setting-color-picker {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.chronoboard-setting-color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.chronoboard-setting-color-picker::-webkit-color-swatch {
+  border: 0;
+  border-radius: 999px;
+}
+
+.chronoboard-month-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.chronoboard-month-head,
+.chronoboard-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.chronoboard-month-head {
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-month-head-cell {
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.chronoboard-month-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  grid-auto-rows: minmax(124px, 1fr);
+}
+
+.chronoboard-month-cell {
+  border-right: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 6px;
+  min-width: 0;
+  background: var(--background-primary);
+  overflow: hidden;
+}
+
+.chronoboard-month-cell.is-outside {
+  background: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary));
+  color: var(--text-faint);
+}
+
+.chronoboard-month-cell.is-today {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 70%, white);
+}
+
+.chronoboard-month-date {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chronoboard-month-cell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chronoboard-month-total {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.chronoboard-month-total.is-light {
+  color: #d1b443;
+}
+
+.chronoboard-month-total.is-medium {
+  color: #5d9dff;
+}
+
+.chronoboard-month-total.is-strong {
+  color: #52d273;
+}
+
+.chronoboard-month-entry-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(34px, 1fr));
+  gap: 4px;
+  margin-top: 8px;
+  align-content: start;
+  height: calc(100% - 28px);
+  min-height: 72px;
+}
+
+.chronoboard-month-entry {
+  border-radius: 6px;
+  padding: 5px 6px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  font-size: 9px;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--interactive-accent);
+  border: 1px solid var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.chronoboard-month-entry.is-default-color {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.chronoboard-month-entry-key {
+  color: var(--chronoboard-custom-text, inherit);
+}
+
+.chronoboard-month-entry-key {
+  font-weight: 600;
+  line-height: 1.15;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+
+.chronoboard-month-entry-hours {
+  color: var(--chronoboard-custom-text, inherit);
+  opacity: 0.88;
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+.chronoboard-month-more {
+  font-size: 10px;
+  color: var(--text-muted);
+  align-self: stretch;
+  justify-self: stretch;
+  border-radius: 6px;
+  border: 1px dashed var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6px;
+  background: var(--background-secondary);
+}
+
+.chronoboard-month-entry-list.count-1 {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.chronoboard-month-entry-list.count-1 .slot-1 {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-2 {
+  grid-template-columns: 1fr;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.chronoboard-month-entry-list.count-2 .slot-1 {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-2 .slot-2 {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-3 .slot-1,
+.chronoboard-month-entry-list.count-5 .slot-1 {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-3 .slot-2,
+.chronoboard-month-entry-list.count-5 .slot-2 {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-3 .slot-3,
+.chronoboard-month-entry-list.count-5 .slot-3 {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-4 .slot-1,
+.chronoboard-month-entry-list.count-5 .slot-1 {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-4 .slot-2,
+.chronoboard-month-entry-list.count-5 .slot-2 {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-4 .slot-3,
+.chronoboard-month-entry-list.count-5 .slot-3 {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-4 .slot-4,
+.chronoboard-month-entry-list.count-5 .slot-4 {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-5 .slot-1 {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-5 .slot-2 {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.chronoboard-month-entry-list.count-5 .slot-3 {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.chronoboard-month-entry-list.count-5 .slot-4 {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.chronoboard-stats-layout {
+  padding: 16px;
+  display: grid;
+  gap: 18px;
+  overflow: auto;
+}
+
+.chronoboard-stats-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.chronoboard-stats-card,
+.chronoboard-stats-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+}
+
+.chronoboard-stats-card {
+  padding: 14px;
+}
+
+.chronoboard-stats-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.chronoboard-stats-label {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.chronoboard-stats-section {
+  padding: 14px;
+}
+
+.chronoboard-stats-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.chronoboard-stats-bars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  align-items: end;
+  gap: 10px;
+  min-height: 210px;
+}
+
+.chronoboard-stats-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.chronoboard-stats-bar {
+  width: 100%;
+  min-height: 10px;
+  border-radius: 8px 8px 4px 4px;
+  background: color-mix(in srgb, var(--interactive-accent) 55%, white);
+}
+
+.chronoboard-stats-bar.is-light {
+  background: #d1b443;
+}
+
+.chronoboard-stats-bar.is-medium {
+  background: #5d9dff;
+}
+
+.chronoboard-stats-bar.is-strong {
+  background: #52d273;
+}
+
+.chronoboard-stats-bar-label,
+.chronoboard-stats-bar-value {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.chronoboard-stats-task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.chronoboard-stats-task-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--background-modifier-border-hover);
+}
+
+.chronoboard-stats-task-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.chronoboard-stats-task-name {
+  min-width: 0;
+}
+
+.chronoboard-stats-task-hours {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chronoboard-menu-remove-separator {
+  margin: 6px -8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.chronoboard-menu-remove-item .menu-item-title,
+.chronoboard-menu-remove-item .menu-item-icon {
+  color: var(--text-error);
+}
+
+.chronoboard-summary-hours {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 4px 0;
+}
+
+.chronoboard-modal-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chronoboard-modal-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: var(--background-primary);
+}
+
+.chronoboard-modal-card:hover {
+  background: var(--background-modifier-hover);
+}
+
+.chronoboard-modal-empty {
+  color: var(--text-muted);
+  margin-top: 12px;
+}
+
+@media (max-width: 1200px) {
+  .chronoboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .chronoboard-panel + .chronoboard-panel {
+    border-left: 0;
+    border-top: 1px solid var(--background-modifier-border);
+  }
+}
