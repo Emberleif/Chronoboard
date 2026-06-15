@@ -419,11 +419,37 @@
   white-space: nowrap;
 }
 
+.chronoboard-day-total.is-light,
+.chronoboard-mobile-day-total.is-light {
+  color: #d1b443;
+}
+
+.chronoboard-day-total.is-medium,
+.chronoboard-mobile-day-total.is-medium {
+  color: #5d9dff;
+}
+
+.chronoboard-day-total.is-strong,
+.chronoboard-mobile-day-total.is-strong {
+  color: #52d273;
+}
+
 .chronoboard-week-hours {
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-right: 1px solid var(--background-modifier-border);
   border-bottom: 1px solid var(--background-modifier-border);
-  height: calc(var(--chronoboard-grid-bottom, 0px) + 1px);
+  min-height: 0;
+  height: 100%;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chronoboard-week-hours::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .chronoboard-hour-marker-vertical {
@@ -442,10 +468,15 @@
 .chronoboard-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  overflow: visible;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-top: 1px solid var(--background-modifier-border-hover);
   border-left: 1px solid var(--background-modifier-border);
   border-bottom: 1px solid var(--background-modifier-border);
+  min-height: 0;
+  height: 100%;
+  align-content: start;
+  overscroll-behavior: contain;
 }
 
 .chronoboard-week-day-column {
@@ -484,13 +515,26 @@
 }
 
 .chronoboard-day-hours-head {
-  display: grid;
-  grid-template-columns: repeat(var(--chronoboard-hour-count, 1), var(--chronoboard-day-hour-width, 84px));
-  align-items: stretch;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   border-left: 1px solid var(--background-modifier-border);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chronoboard-day-hours-head::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.chronoboard-day-hours-track {
+  display: grid;
+  grid-template-columns: repeat(var(--chronoboard-hour-count, 1), var(--chronoboard-day-hour-width, 84px));
+  align-items: stretch;
+  min-width: 100%;
 }
 
 .chronoboard-hour-marker-horizontal {
@@ -523,6 +567,10 @@
   padding-bottom: 0;
 }
 
+.chronoboard-day-grid-content {
+  min-width: 100%;
+}
+
 .chronoboard-day-task-card {
   padding: 10px 12px;
   margin: 0 8px 8px 8px;
@@ -538,7 +586,7 @@
   position: relative;
   height: 88px;
   margin: 0;
-  min-width: 100%;
+  width: 100%;
   border-left: 1px solid var(--background-modifier-border);
   background:
     repeating-linear-gradient(
@@ -555,6 +603,11 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+.chronoboard-modal-textarea {
+  min-height: 140px;
+  resize: vertical;
 }
 
 .chronoboard-color-picker-wrap {
@@ -684,6 +737,30 @@
   cursor: pointer;
 }
 
+.chronoboard-summary-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chronoboard-summary-sort-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.chronoboard-summary-sort-trigger:hover,
+.chronoboard-summary-sort-trigger:focus-visible {
+  color: var(--text-normal);
+  background: transparent;
+  outline: none;
+}
+
 .chronoboard-summary-head-total {
   font-size: var(--font-ui-small);
   font-weight: 700;
@@ -745,6 +822,55 @@
 .chronoboard-setting-color-picker::-webkit-color-swatch {
   border: 0;
   border-radius: 999px;
+}
+
+.chronoboard-settings-section {
+  margin: 0 0 28px 0;
+}
+
+.chronoboard-settings-section-title {
+  margin: 0 0 14px 0;
+  font-size: var(--font-ui-medium);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.chronoboard-settings-section-description {
+  margin: 0 0 14px 0;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.chronoboard-settings-section .setting-item {
+  border: 0;
+  margin: 0 0 12px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--background-primary-alt);
+  box-shadow: none;
+}
+
+.chronoboard-settings-section .setting-item:last-child {
+  margin-bottom: 0;
+}
+
+.chronoboard-settings-section .setting-item-info {
+  align-self: flex-start;
+  padding-right: 16px;
+}
+
+.chronoboard-settings-section .setting-item-name {
+  font-size: var(--font-ui-normal);
+  font-weight: 600;
+}
+
+.chronoboard-settings-section .setting-item-description {
+  margin-top: 4px;
+}
+
+.chronoboard-settings-section .setting-item-control {
+  align-self: center;
 }
 
 .chronoboard-month-layout {
@@ -1109,6 +1235,27 @@
   color: var(--text-error);
 }
 
+.chronoboard-menu-remove-item-with-divider {
+  margin-top: 6px;
+  padding-top: 10px;
+  position: relative;
+}
+
+.chronoboard-menu-remove-item-with-divider::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  top: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  pointer-events: none;
+}
+
+.chronoboard-settings-hour-input {
+  width: 56px;
+  text-align: center;
+}
+
 .chronoboard-summary-hours {
   font-size: 24px;
   font-weight: 700;
@@ -1148,4 +1295,116 @@
     border-left: 0;
     border-top: 1px solid var(--background-modifier-border);
   }
+}
+
+.chronoboard-toolbar.is-mobile {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.chronoboard-toolbar.is-mobile .chronoboard-toolbar-group {
+  width: 100%;
+}
+
+.chronoboard-mobile-layout {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+}
+
+.chronoboard-mobile-panel {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.chronoboard-mobile-notice {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  padding: 10px 12px;
+}
+
+.chronoboard-mobile-task-list,
+.chronoboard-mobile-summary-list {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.chronoboard-mobile-task-card,
+.chronoboard-mobile-add-slot {
+  min-height: 72px;
+}
+
+.chronoboard-mobile-agenda {
+  padding: 10px;
+  display: grid;
+  gap: 12px;
+}
+
+.chronoboard-mobile-day-section {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary-alt);
+  overflow: hidden;
+}
+
+.chronoboard-mobile-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.chronoboard-mobile-day-head-left {
+  min-width: 0;
+}
+
+.chronoboard-mobile-day-name {
+  font-size: var(--font-ui-medium);
+  font-weight: 600;
+}
+
+.chronoboard-mobile-day-date {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 2px;
+}
+
+.chronoboard-mobile-day-total {
+  font-size: var(--font-ui-small);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chronoboard-mobile-entry-list {
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.chronoboard-mobile-entry-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.chronoboard-mobile-entry-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chronoboard-mobile-empty {
+  margin: 10px;
 }

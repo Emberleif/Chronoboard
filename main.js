@@ -7,6 +7,7 @@ const {
   PluginSettingTab,
   Setting,
   TFile,
+  setIcon,
   moment,
 } = require("obsidian");
 
@@ -20,17 +21,30 @@ const STATUS_SORT_ORDER = {
   "on-hold": 2,
   upcoming: 3
 };
+const SUMMARY_SORT_OPTIONS = {
+  status: "Status",
+  alphabetical: "Alphabetical",
+  most: "Most Time",
+  least: "Least Time"
+};
+
+const SUMMARY_SORT_ICONS = {
+  status: "arrow-up-down",
+  alphabetical: "list-ordered",
+  most: "arrow-down-wide-narrow",
+  least: "arrow-up-narrow-wide"
+};
 
 const DEFAULT_SETTINGS = {
   folder: "Chronoboard Tasks",
   timeEntryNotesFolder: "Chronoboard Time Entry Notes",
+  timeEntryNoteTemplate: "",
   selectedTaskPaths: [],
   staticTaskPaths: [],
   boardOnlyTaskPaths: [],
   hideWeekends: true,
   visibleStartHour: 8,
   visibleEndHour: 19,
-  activeProperty: "active",
   jiraTag: "chronoboard",
   taskTag: "task",
   filterProperty: "Status",
@@ -38,8 +52,12 @@ const DEFAULT_SETTINGS = {
   colorProperty: "timeboardColor",
   subtitleProperty: "timeboardSubtitle",
   highlightColor: "",
-  forceDarkTextOnColored: false
+  forceDarkTextOnColored: false,
+  lastSeenVersion: ""
 };
+
+const GUIDE_NOTE_PATH = "Getting Started With Chronoboard.md";
+const CHANGELOG_NOTE_PATH = "Chronoboard - Changelog.md";
 
 function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
@@ -88,6 +106,39 @@ function extractStatusValuesFromText(text, statusProperty) {
   }
 
   return values.filter(Boolean);
+}
+
+function splitFrontmatter(content) {
+  const text = String(content || "").replace(/\r\n/g, "\n");
+  if (!text.startsWith("---\n")) {
+    return {
+      frontmatterLines: [],
+      body: text
+    };
+  }
+  const lines = text.split("\n");
+  let closingIndex = -1;
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() === "---") {
+      closingIndex = index;
+      break;
+    }
+  }
+  if (closingIndex === -1) {
+    return {
+      frontmatterLines: [],
+      body: text
+    };
+  }
+  return {
+    frontmatterLines: lines.slice(1, closingIndex),
+    body: lines.slice(closingIndex + 1).join("\n")
+  };
+}
+
+function normalizeFrontmatterKey(line) {
+  const match = String(line || "").match(/^\s*([A-Za-z0-9_-]+)\s*:/);
+  return match ? match[1].trim().toLowerCase() : "";
 }
 
 function rawFrontmatterContainsExcludedValue(text, propertyName, excludedValues) {
@@ -232,7 +283,7 @@ class TaskPickerModal extends Modal {
     if (!filtered.length) {
       contentEl.createDiv({
         cls: "chronoboard-modal-empty",
-        text: "No eligible notes are available in the configured folder."
+        text: "No eligible tasks are available in the configured folder."
       });
       return;
     }
@@ -247,7 +298,7 @@ class TaskPickerModal extends Modal {
       }
       card.createDiv({
         cls: "chronoboard-task-meta",
-        text: `${task.status || "unknown"}${task.active ? " • active" : ""}`
+        text: `${task.status || "unknown"}`
       });
       card.addEventListener("click", () => {
         this.onChoose(task);
@@ -341,14 +392,14 @@ class TicketColorModal extends Modal {
 
   onOpen() {
     const { contentEl, titleEl } = this;
-    titleEl.setText("Change ticket color");
+    titleEl.setText("Change task color");
     contentEl.empty();
 
     let currentColor = this.initialColor;
 
     new Setting(contentEl)
       .setName("Color")
-      .setDesc("Set the color used for this ticket in the timeboard.")
+      .setDesc("Set the color used for this task in the timeboard.")
       .addText((text) => {
         text.setPlaceholder("#4f8ad9").setValue(currentColor);
         text.onChange((value) => {
@@ -411,10 +462,12 @@ class TimeBoxTextModal extends Modal {
     let currentValue = this.initialText;
 
     new Setting(contentEl)
-      .setName("Box notes")
-      .setDesc("This text appears below the time inside the time box.")
-      .addText((text) => {
+      .setName("Task block text")
+      .setDesc("This text appears below the time inside the task block.")
+      .addTextArea((text) => {
         text.setPlaceholder("What you did in this block").setValue(currentValue);
+        text.inputEl.rows = 6;
+        text.inputEl.addClass("chronoboard-modal-textarea");
         text.onChange((value) => {
           currentValue = value;
         });
@@ -452,14 +505,14 @@ class TicketSubtitleModal extends Modal {
 
   onOpen() {
     const { contentEl, titleEl } = this;
-    titleEl.setText("Edit ticket subtitle");
+    titleEl.setText("Edit task subtitle");
     contentEl.empty();
 
     let currentValue = this.initialText;
 
     new Setting(contentEl)
       .setName("Subtitle")
-      .setDesc("Shown below the ticket key on cards and above the time inside blocks.")
+      .setDesc("Shown below the task key on cards and above the time inside blocks.")
       .addText((text) => {
         text.setPlaceholder("Meeting name or short label").setValue(currentValue);
         text.onChange((value) => {
@@ -490,19 +543,217 @@ class TicketSubtitleModal extends Modal {
   }
 }
 
+class ManualTimeEntryModal extends Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.defaultTaskPath = options.defaultTaskPath || "";
+    this.onComplete = options.onComplete;
+    this.selectedTaskPath = this.defaultTaskPath;
+    this.selectedDate = moment().format("YYYY-MM-DD");
+    this.startValue = "09:00";
+    this.endValue = "10:00";
+    this.blockText = "";
+    this.updateTaskColor = false;
+    this.colorValue = "#4f8ad9";
+    this.tasks = [];
+  }
+
+  async onOpen() {
+    const { contentEl, titleEl } = this;
+    titleEl.setText("Manual time entry");
+    contentEl.empty();
+
+    this.tasks = await this.plugin.getAvailableTasks();
+    if (!this.tasks.length) {
+      contentEl.createDiv({
+        cls: "chronoboard-modal-empty",
+        text: "No eligible tasks are available in the configured folder."
+      });
+      return;
+    }
+
+    if (!this.tasks.find((task) => task.path === this.selectedTaskPath)) {
+      this.selectedTaskPath = this.tasks[0].path;
+    }
+    const selectedTask = this.tasks.find((task) => task.path === this.selectedTaskPath) || this.tasks[0];
+    this.colorValue = normalizeHexColor(selectedTask?.color) || "#4f8ad9";
+
+    new Setting(contentEl)
+      .setName("Task")
+      .setDesc("Choose which task to log time against.")
+      .addDropdown((dropdown) => {
+        this.tasks.forEach((task) => {
+          const label = this.plugin.getTaskLabel(task);
+          dropdown.addOption(task.path, label);
+        });
+        dropdown.setValue(this.selectedTaskPath);
+        dropdown.onChange((value) => {
+          this.selectedTaskPath = value;
+          const chosen = this.tasks.find((task) => task.path === value);
+          this.colorValue = normalizeHexColor(chosen?.color) || "#4f8ad9";
+          colorText?.setValue(this.colorValue);
+          colorPicker.value = this.colorValue;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName("Date")
+      .setDesc("Date for the time entry.")
+      .addText((text) => {
+        text.setValue(this.selectedDate);
+        text.inputEl.type = "date";
+        text.onChange((value) => {
+          this.selectedDate = value;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName("Start time")
+      .setDesc("Start time for the entry.")
+      .addText((text) => {
+        text.setValue(this.startValue);
+        text.inputEl.type = "time";
+        text.onChange((value) => {
+          this.startValue = value;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName("End time")
+      .setDesc("End time for the entry.")
+      .addText((text) => {
+        text.setValue(this.endValue);
+        text.inputEl.type = "time";
+        text.onChange((value) => {
+          this.endValue = value;
+        });
+      });
+
+    new Setting(contentEl)
+      .setName("Task block text")
+      .setDesc("Optional text shown inside the time block.")
+      .addTextArea((text) => {
+        text.setPlaceholder("What you worked on").setValue(this.blockText);
+        text.inputEl.rows = 5;
+        text.inputEl.addClass("chronoboard-modal-textarea");
+        text.onChange((value) => {
+          this.blockText = value;
+        });
+      });
+
+    let colorText = null;
+    let colorPicker = null;
+    new Setting(contentEl)
+      .setName("Task color")
+      .setDesc("Optional. Update the selected task color while creating this entry.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.updateTaskColor);
+        toggle.onChange((value) => {
+          this.updateTaskColor = value;
+        });
+      })
+      .addText((text) => {
+        colorText = text;
+        text.setPlaceholder("#4f8ad9").setValue(this.colorValue);
+        text.onChange((value) => {
+          const normalized = normalizeHexColor(value);
+          if (normalized) {
+            this.colorValue = normalized;
+            if (colorPicker) {
+              colorPicker.value = normalized;
+            }
+          }
+        });
+        const control = text.inputEl.closest(".setting-item-control") || text.inputEl.parentElement;
+        const pickerWrap = control.createDiv({ cls: "chronoboard-setting-color-wrap" });
+        colorPicker = pickerWrap.createEl("input", { cls: "chronoboard-setting-color-picker" });
+        colorPicker.type = "color";
+        colorPicker.value = this.colorValue;
+        colorPicker.addEventListener("input", () => {
+          this.colorValue = colorPicker.value;
+          colorText.setValue(this.colorValue);
+        });
+      });
+
+    const actions = contentEl.createDiv({ cls: "chronoboard-modal-actions" });
+    const saveButton = actions.createEl("button", { text: "Save" });
+    const cancelButton = actions.createEl("button", { text: "Cancel" });
+
+    saveButton.addEventListener("click", async () => {
+      const chosenTask = this.tasks.find((task) => task.path === this.selectedTaskPath);
+      if (!chosenTask) {
+        new Notice("Choose a task first.");
+        return;
+      }
+      if (!this.selectedDate || !this.startValue || !this.endValue) {
+        new Notice("Date, start time, and end time are required.");
+        return;
+      }
+      const start = moment(`${this.selectedDate}T${this.startValue}`);
+      const end = moment(`${this.selectedDate}T${this.endValue}`);
+      if (!start.isValid() || !end.isValid() || !end.isAfter(start)) {
+        new Notice("End time must be after start time.");
+        return;
+      }
+
+      if (this.updateTaskColor) {
+        const normalizedColor = normalizeHexColor(this.colorValue);
+        if (!normalizedColor) {
+          new Notice("Enter a valid task color before saving.");
+          return;
+        }
+        await this.plugin.updateTicketColor(chosenTask.file, normalizedColor);
+      }
+
+      await this.plugin.addTimeEntry(chosenTask.file, {
+        startTime: start.format("YYYY-MM-DDTHH:mm"),
+        endTime: end.format("YYYY-MM-DDTHH:mm"),
+        label: this.blockText.trim()
+      }, { pushUndo: true });
+
+      if (typeof this.onComplete === "function") {
+        await this.onComplete(chosenTask.path);
+      }
+      this.close();
+    });
+
+    cancelButton.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class ChronoboardSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
 
+  createSection(containerEl, title, description) {
+    const section = containerEl.createDiv({ cls: "chronoboard-settings-section" });
+    section.createEl("h3", { cls: "chronoboard-settings-section-title", text: title });
+    if (description) {
+      section.createDiv({ cls: "chronoboard-settings-section-description", text: description });
+    }
+    return section;
+  }
+
   display() {
     const { containerEl } = this;
     containerEl.empty();
 
-    new Setting(containerEl)
+    const folderSection = this.createSection(
+      containerEl,
+      "Folder Settings",
+      "Choose where Chronoboard reads tasks from and where it stores time entry task notes."
+    );
+
+    new Setting(folderSection)
       .setName("Folder")
-      .setDesc("Folder containing the notes used by the add-task picker.")
+      .setDesc("Folder containing the tasks used by the add-task picker.")
       .addText((text) =>
         text
           .setPlaceholder(DEFAULT_SETTINGS.folder)
@@ -514,7 +765,54 @@ class ChronoboardSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(folderSection)
+      .setName("Time entry notes folder")
+      .setDesc("Folder used when creating dedicated time entry task notes.")
+      .addText((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.timeEntryNotesFolder)
+          .setValue(this.plugin.settings.timeEntryNotesFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.timeEntryNotesFolder = value.trim() || DEFAULT_SETTINGS.timeEntryNotesFolder;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    new Setting(folderSection)
+      .setName("Time entry note template")
+      .setDesc("Optional template note used when creating time entry notes. Chronoboard entry fields are appended after the template frontmatter.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Templates/Chronoboard Time Entry Template.md")
+          .setValue(this.plugin.settings.timeEntryNoteTemplate || "")
+          .onChange(async (value) => {
+            this.plugin.settings.timeEntryNoteTemplate = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(folderSection)
+      .setName("Always include tasks")
+      .setDesc("Task paths that should always appear on the task list and totals rail. One path per line or comma-separated.")
+      .addTextArea((text) =>
+        text
+          .setPlaceholder("Chronoboard Tasks/Meetings.md")
+          .setValue((this.plugin.settings.staticTaskPaths || []).join("\n"))
+          .onChange(async (value) => {
+            this.plugin.settings.staticTaskPaths = parsePathList(value);
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    const metadataSection = this.createSection(
+      containerEl,
+      "Frontmatter Settings",
+      "Control which tasks appear in the picker by filtering against a metadata property."
+    );
+
+    new Setting(metadataSection)
       .setName("Metadata property")
       .setDesc("Property name used when deciding what to exclude from the add-task menu.")
       .addText((text) =>
@@ -528,9 +826,9 @@ class ChronoboardSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    new Setting(metadataSection)
       .setName("Excluded values")
-      .setDesc("Comma-separated values that exclude a note from the add-task menu when found in the metadata property.")
+      .setDesc("Comma-separated values that exclude a task from the add-task menu when found in the metadata property.")
       .addText((text) =>
         text
           .setPlaceholder("Finished")
@@ -545,23 +843,15 @@ class ChronoboardSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("Always include notes")
-      .setDesc("Note paths that should always appear on the task list and totals rail. One path per line or comma-separated.")
-      .addTextArea((text) =>
-        text
-          .setPlaceholder("Chronoboard Tasks/Meetings.md")
-          .setValue((this.plugin.settings.staticTaskPaths || []).join("\n"))
-          .onChange(async (value) => {
-            this.plugin.settings.staticTaskPaths = parsePathList(value);
-            await this.plugin.saveSettings();
-            await this.plugin.refreshAllViews();
-          })
-      );
+    const setupSection = this.createSection(
+      containerEl,
+      "Setup Settings",
+      "Configure the board timeline and working window."
+    );
 
-    new Setting(containerEl)
-      .setName("Hide weekends in week view")
-      .setDesc("Show only Monday through Friday in the week timeline.")
+    new Setting(setupSection)
+      .setName("Hide weekends in week and month views")
+      .setDesc("Show only Monday through Friday in the week and month timelines.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.hideWeekends)
@@ -572,10 +862,22 @@ class ChronoboardSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
+    let visibleStartSlider;
+    let visibleStartText;
+    let visibleEndSlider;
+    let visibleEndText;
+    const syncVisibleHourControls = () => {
+      visibleStartSlider?.setValue(this.plugin.settings.visibleStartHour, false);
+      visibleStartText?.setValue(String(this.plugin.settings.visibleStartHour));
+      visibleEndSlider?.setValue(this.plugin.settings.visibleEndHour, false);
+      visibleEndText?.setValue(String(this.plugin.settings.visibleEndHour));
+    };
+
+    new Setting(setupSection)
       .setName("Visible start hour")
       .setDesc("First hour marker shown in week and day views.")
-      .addSlider((slider) =>
+      .addSlider((slider) => {
+        visibleStartSlider = slider;
         slider
           .setLimits(0, 20, 1)
           .setDynamicTooltip()
@@ -585,27 +887,73 @@ class ChronoboardSettingTab extends PluginSettingTab {
             if (this.plugin.settings.visibleEndHour <= value) {
               this.plugin.settings.visibleEndHour = value + 1;
             }
+            syncVisibleHourControls();
             await this.plugin.saveSettings();
             await this.plugin.refreshAllViews();
-          })
-      );
+          });
+      })
+      .addText((text) => {
+        visibleStartText = text;
+        text
+          .setPlaceholder("8")
+          .setValue(String(this.plugin.settings.visibleStartHour))
+          .onChange(async (value) => {
+            const parsed = Number.parseInt(String(value).trim(), 10);
+            if (Number.isNaN(parsed)) {
+              return;
+            }
+            this.plugin.settings.visibleStartHour = clampNumber(parsed, 0, 20);
+            if (this.plugin.settings.visibleEndHour <= this.plugin.settings.visibleStartHour) {
+              this.plugin.settings.visibleEndHour = this.plugin.settings.visibleStartHour + 1;
+            }
+            syncVisibleHourControls();
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          });
+        text.inputEl.addClass("chronoboard-settings-hour-input");
+      });
 
-    new Setting(containerEl)
+    new Setting(setupSection)
       .setName("Visible end hour")
       .setDesc("Last hour marker shown in week and day views.")
-      .addSlider((slider) =>
+      .addSlider((slider) => {
+        visibleEndSlider = slider;
         slider
           .setLimits(1, 24, 1)
           .setDynamicTooltip()
           .setValue(this.plugin.settings.visibleEndHour)
           .onChange(async (value) => {
             this.plugin.settings.visibleEndHour = Math.max(value, this.plugin.settings.visibleStartHour + 1);
+            syncVisibleHourControls();
             await this.plugin.saveSettings();
             await this.plugin.refreshAllViews();
-          })
-      );
+          });
+      })
+      .addText((text) => {
+        visibleEndText = text;
+        text
+          .setPlaceholder("19")
+          .setValue(String(this.plugin.settings.visibleEndHour))
+          .onChange(async (value) => {
+            const parsed = Number.parseInt(String(value).trim(), 10);
+            if (Number.isNaN(parsed)) {
+              return;
+            }
+            this.plugin.settings.visibleEndHour = clampNumber(parsed, this.plugin.settings.visibleStartHour + 1, 24);
+            syncVisibleHourControls();
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          });
+        text.inputEl.addClass("chronoboard-settings-hour-input");
+      });
 
-    new Setting(containerEl)
+    const customizationSection = this.createSection(
+      containerEl,
+      "Customization Settings",
+      "Adjust how Chronoboard looks and how colored task surfaces behave."
+    );
+
+    new Setting(customizationSection)
       .setName("Highlight color")
       .setDesc("Accent color used for selected states and active controls.")
       .addText((text) => {
@@ -647,7 +995,7 @@ class ChronoboardSettingTab extends PluginSettingTab {
         });
       });
 
-    new Setting(containerEl)
+    new Setting(customizationSection)
       .setName("Force dark text on colored cards")
       .setDesc("Use dark text on colored task cards and time blocks even when the color is light.")
       .addToggle((toggle) =>
@@ -670,6 +1018,7 @@ class ChronoboardView extends ItemView {
     this.focusDate = moment();
     this.currentMode = "week";
     this.selectedTaskPath = plugin.settings.selectedTaskPaths[0] || null;
+    this.currentSummarySort = "status";
     this.leftPanelCollapsed = false;
     this.rightPanelCollapsed = false;
     this.dragState = null;
@@ -801,9 +1150,42 @@ class ChronoboardView extends ItemView {
     return this.sortTasks(scoped);
   }
 
+  getSummarySortedTasks(tasks) {
+    const scoped = this.getScopedTasks(tasks);
+    if (this.currentSummarySort === "alphabetical") {
+      return [...scoped].sort((a, b) => this.plugin.getTaskLabel(a).localeCompare(this.plugin.getTaskLabel(b)));
+    }
+    if (this.currentSummarySort === "most") {
+      return [...scoped].sort((a, b) => {
+        const minuteDiff = this.getSummaryMinutesForTask(b) - this.getSummaryMinutesForTask(a);
+        if (minuteDiff !== 0) {
+          return minuteDiff;
+        }
+        return this.plugin.getTaskLabel(a).localeCompare(this.plugin.getTaskLabel(b));
+      });
+    }
+    if (this.currentSummarySort === "least") {
+      return [...scoped].sort((a, b) => {
+        const minuteDiff = this.getSummaryMinutesForTask(a) - this.getSummaryMinutesForTask(b);
+        if (minuteDiff !== 0) {
+          return minuteDiff;
+        }
+        return this.plugin.getTaskLabel(a).localeCompare(this.plugin.getTaskLabel(b));
+      });
+    }
+    return [...scoped].sort((a, b) => {
+      const rankDiff = getStatusSortRank(a.status) - getStatusSortRank(b.status);
+      if (rankDiff !== 0) {
+        return rankDiff;
+      }
+      return this.plugin.getTaskLabel(a).localeCompare(this.plugin.getTaskLabel(b));
+    });
+  }
+
   async render() {
     this.contentEl.empty();
     this.contentEl.addClass("chronoboard-view");
+    this.contentEl.classList.toggle("is-mobile", this.isMobileLayout());
     this.contentEl.style.setProperty("--chronoboard-highlight", getHighlightCssValue(this.plugin.settings.highlightColor));
 
     const poolPaths = this.getSelectedPaths();
@@ -816,6 +1198,10 @@ class ChronoboardView extends ItemView {
     }
 
     this.renderToolbar(currentTasks);
+    if (this.isMobileLayout()) {
+      this.renderMobileLayout(currentTasks, visibleTasks, poolPaths);
+      return;
+    }
     const layoutClasses = ["chronoboard-layout"];
     if (this.leftPanelCollapsed) {
       layoutClasses.push("is-left-collapsed");
@@ -835,13 +1221,18 @@ class ChronoboardView extends ItemView {
     return Math.max(PX_PER_HOUR, Math.floor(stretched));
   }
 
+  isMobileLayout() {
+    return Boolean(this.app.isMobile);
+  }
+
   getDayTimelineWidth(container) {
     const width = container.clientWidth || container.getBoundingClientRect().width || 0;
     return Math.max(width, this.getVisibleHourCount() * 84);
   }
 
   renderToolbar(selectedTasks) {
-    const toolbar = this.contentEl.createDiv({ cls: "chronoboard-toolbar" });
+    const isMobile = this.isMobileLayout();
+    const toolbar = this.contentEl.createDiv({ cls: `chronoboard-toolbar${isMobile ? " is-mobile" : ""}` });
     const left = toolbar.createDiv({ cls: "chronoboard-toolbar-group" });
     left.createDiv({ cls: "chronoboard-title", text: "Chronoboard" });
     left.createDiv({
@@ -860,23 +1251,25 @@ class ChronoboardView extends ItemView {
       await this.render();
     });
 
-    const taskToggle = right.createEl("button", {
-      cls: "chronoboard-collapse-button",
-      text: this.leftPanelCollapsed ? "Task" : "Hide Task"
-    });
-    taskToggle.addEventListener("click", async () => {
-      this.leftPanelCollapsed = !this.leftPanelCollapsed;
-      await this.render();
-    });
+    if (!isMobile) {
+      const taskToggle = right.createEl("button", {
+        cls: "chronoboard-collapse-button",
+        text: this.leftPanelCollapsed ? "Task" : "Hide Task"
+      });
+      taskToggle.addEventListener("click", async () => {
+        this.leftPanelCollapsed = !this.leftPanelCollapsed;
+        await this.render();
+      });
 
-    const totalsToggle = right.createEl("button", {
-      cls: "chronoboard-collapse-button",
-      text: this.rightPanelCollapsed ? "Totals" : "Hide Totals"
-    });
-    totalsToggle.addEventListener("click", async () => {
-      this.rightPanelCollapsed = !this.rightPanelCollapsed;
-      await this.render();
-    });
+      const totalsToggle = right.createEl("button", {
+        cls: "chronoboard-collapse-button",
+        text: this.rightPanelCollapsed ? "Totals" : "Hide Totals"
+      });
+      totalsToggle.addEventListener("click", async () => {
+        this.rightPanelCollapsed = !this.rightPanelCollapsed;
+        await this.render();
+      });
+    }
 
     const prevButton = right.createEl("button", { cls: "chronoboard-nav-button", text: "<" });
     prevButton.addEventListener("click", async () => {
@@ -943,7 +1336,23 @@ class ChronoboardView extends ItemView {
 
   renderTaskRail(layout, selectedTasks, selectedPaths) {
     const panel = layout.createDiv({ cls: "chronoboard-panel" });
-    panel.createDiv({ cls: "chronoboard-panel-head", text: "Task" });
+    const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
+    panelHead.createDiv({ text: "Task" });
+    const helpTrigger = panelHead.createSpan({ cls: "chronoboard-summary-sort-trigger chronoboard-help-trigger" });
+    setIcon(helpTrigger, "help-circle");
+    helpTrigger.setAttr("role", "button");
+    helpTrigger.setAttr("tabindex", "0");
+    helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
+    helpTrigger.setAttr("title", "Open Chronoboard guide");
+    helpTrigger.addEventListener("click", async () => {
+      await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+    });
+    helpTrigger.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+      }
+    });
 
     if (this.leftPanelCollapsed) {
       return;
@@ -970,12 +1379,17 @@ class ChronoboardView extends ItemView {
         this.selectedTaskPath = task.path;
         await this.render();
       });
+      card.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.openTask(task);
+      });
       card.addEventListener("contextmenu", (event) => this.openTicketContextMenu(event, task));
     });
 
     const add = list.createDiv({ cls: "chronoboard-add-slot" });
     add.createDiv({ cls: "chronoboard-plus", text: "+" });
-    add.createSpan({ text: "Add task slot" });
+    add.createSpan({ text: "Add task" });
     add.addEventListener("click", () => {
       new TaskPickerModal(this.app, this.plugin, {
         excludePaths: selectedPaths,
@@ -992,9 +1406,272 @@ class ChronoboardView extends ItemView {
     if (!selectedTasks.length) {
       list.createDiv({
         cls: "chronoboard-empty",
-        text: "Use the plus button to add notes from the configured folder."
+        text: "Use the plus button to add tasks from the configured folder."
       });
     }
+  }
+
+  renderMobileLayout(currentTasks, visibleTasks, selectedPaths) {
+    const layout = this.contentEl.createDiv({ cls: "chronoboard-mobile-layout" });
+    layout.createDiv({
+      cls: "chronoboard-mobile-notice",
+      text: "Read-only mobile view. Use desktop for drag, resize, and time editing."
+    });
+
+    this.renderMobileTaskPool(layout, currentTasks, selectedPaths);
+
+    const timelinePanel = layout.createDiv({ cls: "chronoboard-panel chronoboard-mobile-panel" });
+    const timelineHead = timelinePanel.createDiv({ cls: "chronoboard-panel-head chronoboard-mobile-timeline-head" });
+    timelineHead.createDiv({
+      text:
+        this.currentMode === "day"
+          ? `Daily Time • ${this.focusDate.format("dddd")}`
+          : this.currentMode === "week"
+            ? "Weekly Time"
+            : this.currentMode === "month"
+              ? "Monthly Time"
+              : "Statistics"
+    });
+
+    if (this.currentMode === "stats") {
+      this.renderStatistics(timelinePanel, visibleTasks);
+    } else {
+      this.renderMobileTimeline(timelinePanel, visibleTasks);
+    }
+
+    this.renderMobileSummary(layout, visibleTasks);
+  }
+
+  renderMobileTaskPool(layout, currentTasks, selectedPaths) {
+    const panel = layout.createDiv({ cls: "chronoboard-panel chronoboard-mobile-panel" });
+    const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
+    panelHead.createDiv({ text: "Tasks" });
+    const helpTrigger = panelHead.createSpan({ cls: "chronoboard-summary-sort-trigger chronoboard-help-trigger" });
+    setIcon(helpTrigger, "help-circle");
+    helpTrigger.setAttr("role", "button");
+    helpTrigger.setAttr("tabindex", "0");
+    helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
+    helpTrigger.setAttr("title", "Open Chronoboard guide");
+    helpTrigger.addEventListener("click", async () => {
+      await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+    });
+    helpTrigger.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+      }
+    });
+    const list = panel.createDiv({ cls: "chronoboard-mobile-task-list" });
+
+    currentTasks.forEach((task) => {
+      const card = list.createDiv({
+        cls: `chronoboard-task-card chronoboard-mobile-task-card${task.path === this.selectedTaskPath ? " is-selected" : ""}${this.taskHasVisibleTime(task) ? " has-time" : ""}`
+      });
+      this.applyTicketSurfaceStyle(card, task, this.taskHasVisibleTime(task));
+      const main = card.createDiv({ cls: "chronoboard-task-main" });
+      main.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
+      const secondaryText = this.plugin.getTaskSecondaryText(task);
+      if (secondaryText) {
+        main.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
+      }
+      if (this.shouldDisplayTaskStatus(task)) {
+        main.createDiv({ cls: `chronoboard-task-meta chronoboard-status ${getStatusToneClass(task.status)}`, text: task.status });
+      }
+      card.addEventListener("click", async () => {
+        this.selectedTaskPath = task.path;
+        await this.render();
+      });
+      card.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.openTask(task);
+      });
+    });
+
+    const add = list.createDiv({ cls: "chronoboard-add-slot chronoboard-mobile-add-slot" });
+    add.createDiv({ cls: "chronoboard-plus", text: "+" });
+    add.createSpan({ text: "Add task" });
+    add.addEventListener("click", () => {
+      new TaskPickerModal(this.app, this.plugin, {
+        excludePaths: selectedPaths,
+        onChoose: async (task) => {
+          this.plugin.settings.selectedTaskPaths = [...this.plugin.settings.selectedTaskPaths, task.path];
+          this.plugin.settings.boardOnlyTaskPaths = (this.plugin.settings.boardOnlyTaskPaths || []).filter((path) => path !== task.path);
+          this.selectedTaskPath = task.path;
+          await this.plugin.saveSettings();
+          await this.render();
+        }
+      }).open();
+    });
+  }
+
+  renderMobileTimeline(panel, visibleTasks) {
+    const agenda = panel.createDiv({ cls: "chronoboard-mobile-agenda" });
+    if (this.currentMode === "day") {
+      this.renderMobileDaySection(agenda, this.focusDate.clone().startOf("day"), visibleTasks);
+      return;
+    }
+    if (this.currentMode === "week") {
+      this.getWeekDays().forEach((dayMoment) => {
+        this.renderMobileDaySection(agenda, dayMoment, visibleTasks);
+      });
+      return;
+    }
+
+    const monthStart = this.focusDate.clone().startOf("month");
+    const monthEnd = this.focusDate.clone().endOf("month");
+    const cursor = monthStart.clone();
+    let renderedCount = 0;
+    while (cursor.isSameOrBefore(monthEnd, "day")) {
+      if (!this.plugin.settings.hideWeekends || cursor.isoWeekday() <= 5) {
+        const before = agenda.childElementCount;
+        this.renderMobileDaySection(agenda, cursor.clone(), visibleTasks, { hideWhenEmpty: true });
+        if (agenda.childElementCount > before) {
+          renderedCount += 1;
+        }
+      }
+      cursor.add(1, "day");
+    }
+    if (!renderedCount) {
+      agenda.createDiv({
+        cls: "chronoboard-empty chronoboard-mobile-empty",
+        text: "No tracked time this month."
+      });
+    }
+  }
+
+  renderMobileDaySection(container, dayMoment, visibleTasks, options = {}) {
+    const dayKey = dayMoment.format("YYYY-MM-DD");
+    const entries = this.getEntriesForDay(visibleTasks, dayKey);
+    if (options.hideWhenEmpty && !entries.length) {
+      return;
+    }
+
+    const totalMinutes = entries.reduce((sum, item) => sum + this.entryMinutes(item.entry), 0);
+    const section = container.createDiv({ cls: "chronoboard-mobile-day-section" });
+    const head = section.createDiv({ cls: "chronoboard-mobile-day-head" });
+    const left = head.createDiv({ cls: "chronoboard-mobile-day-head-left" });
+    left.createDiv({ cls: "chronoboard-mobile-day-name", text: dayMoment.format("dddd") });
+    left.createDiv({ cls: "chronoboard-mobile-day-date", text: dayMoment.format("MMM D") });
+    head.createDiv({
+      cls: `chronoboard-mobile-day-total ${getHoursColor(totalMinutes)}`,
+      text: totalMinutes ? formatHours(totalMinutes) : "0h"
+    });
+
+    if (!entries.length) {
+      section.createDiv({
+        cls: "chronoboard-empty chronoboard-mobile-empty",
+        text: "No tracked time."
+      });
+      return;
+    }
+
+    const list = section.createDiv({ cls: "chronoboard-mobile-entry-list" });
+    entries.forEach(({ task, entry }) => {
+      const card = list.createDiv({ cls: "chronoboard-mobile-entry-card" });
+      this.applyTicketSurfaceStyle(card, task, true);
+      const top = card.createDiv({ cls: "chronoboard-mobile-entry-top" });
+      top.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
+      if (this.shouldDisplayTaskStatus(task)) {
+        top.createDiv({
+          cls: `chronoboard-block-status ${getStatusToneClass(task.status)}`,
+          text: task.status
+        });
+      }
+      const secondaryText = this.plugin.getTaskSecondaryText(task);
+      if (secondaryText) {
+        card.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
+      }
+      card.createDiv({
+        cls: "chronoboard-block-time",
+        text: `${moment(entry.startTime).format("HH:mm")} to ${moment(entry.endTime).format("HH:mm")}`
+      });
+      if (entry.label) {
+        card.createDiv({
+          cls: "chronoboard-block-notes",
+          text: entry.label
+        });
+      }
+      card.addEventListener("click", async () => {
+        await this.app.workspace.getLeaf("tab").openFile(task.file);
+      });
+    });
+  }
+
+  renderMobileSummary(layout, visibleTasks) {
+    const scopedTasks = this.getSummarySortedTasks(visibleTasks);
+    const panel = layout.createDiv({ cls: "chronoboard-panel chronoboard-mobile-panel" });
+    const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
+    panelHead.createDiv({
+      text: this.currentMode === "day" ? "Daily Total" : this.currentMode === "month" ? "Monthly Total" : "Weekly Total"
+    });
+    const headMeta = panelHead.createDiv({ cls: "chronoboard-summary-head-meta" });
+    headMeta.createDiv({
+      cls: "chronoboard-summary-head-total",
+      text: formatHours(scopedTasks.reduce((sum, task) => sum + this.getSummaryMinutesForTask(task), 0))
+    });
+    const sortTrigger = headMeta.createSpan({ cls: "chronoboard-summary-sort-trigger" });
+    setIcon(sortTrigger, SUMMARY_SORT_ICONS[this.currentSummarySort] || SUMMARY_SORT_ICONS.status);
+    sortTrigger.setAttr("role", "button");
+    sortTrigger.setAttr("tabindex", "0");
+    sortTrigger.setAttr("aria-label", `Sort totals: ${SUMMARY_SORT_OPTIONS[this.currentSummarySort] || SUMMARY_SORT_OPTIONS.status}`);
+    sortTrigger.setAttr("title", `Sort totals: ${SUMMARY_SORT_OPTIONS[this.currentSummarySort] || SUMMARY_SORT_OPTIONS.status}`);
+    sortTrigger.addEventListener("click", (event) => this.openSummarySortMenu(event));
+    sortTrigger.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this.openSummarySortMenu(event);
+      }
+    });
+
+    const list = panel.createDiv({ cls: "chronoboard-summary-list chronoboard-mobile-summary-list" });
+    if (!scopedTasks.length) {
+      list.createDiv({
+        cls: "chronoboard-empty",
+        text: "Totals will appear once visible tasks have tracked time."
+      });
+      return;
+    }
+
+    scopedTasks.forEach((task) => {
+      const card = list.createDiv({
+        cls: `chronoboard-summary-card${task.path === this.selectedTaskPath ? " is-selected" : ""}${this.taskHasVisibleTime(task) ? " has-time" : ""}`
+      });
+      this.applyTicketSurfaceStyle(card, task, this.taskHasVisibleTime(task));
+      card.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
+      const secondaryText = this.plugin.getTaskSecondaryText(task);
+      if (secondaryText) {
+        card.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
+      }
+      card.createDiv({ cls: "chronoboard-summary-hours", text: formatHours(this.getSummaryMinutesForTask(task)) });
+      card.createDiv({
+        cls: "chronoboard-summary-note",
+        text: this.currentMode === "day" ? "Tracked this day" : this.currentMode === "month" ? "Tracked this month" : "Tracked this week"
+      });
+      card.addEventListener("click", async () => {
+        this.selectedTaskPath = task.path;
+        await this.render();
+      });
+      card.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.openTask(task);
+      });
+    });
+  }
+
+  getEntriesForDay(tasks, dayKey) {
+    const entries = [];
+    tasks.forEach((task) => {
+      (task.timeEntries || []).forEach((entry, index) => {
+        const start = parseFrontmatterDate(entry.startTime);
+        if (!start || start.format("YYYY-MM-DD") !== dayKey) {
+          return;
+        }
+        entries.push({ task, entry, index });
+      });
+    });
+    return entries.sort((a, b) => String(a.entry.startTime).localeCompare(String(b.entry.startTime)));
   }
 
   renderCenter(layout, selectedTasks) {
@@ -1037,7 +1714,6 @@ class ChronoboardView extends ItemView {
     this.currentHourHeight = this.getDynamicHourHeight(panel);
     const wrapper = panel.createDiv({ cls: "chronoboard-week-layout" });
     wrapper.style.setProperty("--chronoboard-hour-height", `${this.currentHourHeight}px`);
-    wrapper.style.setProperty("--chronoboard-grid-bottom", `${this.getTimelineHeight()}px`);
 
     wrapper.createDiv({ cls: "chronoboard-week-corner" });
 
@@ -1057,8 +1733,8 @@ class ChronoboardView extends ItemView {
 
     const hours = wrapper.createDiv({ cls: "chronoboard-week-hours" });
     const grid = wrapper.createDiv({ cls: "chronoboard-week-grid" });
-    grid.style.height = `${this.getTimelineHeight()}px`;
     grid.style.gridTemplateColumns = `repeat(${weekDays.length}, minmax(0, 1fr))`;
+    this.syncScrollPair(hours, grid, "vertical");
 
     this.renderHourMarkers(hours, false, this.currentHourHeight);
 
@@ -1092,18 +1768,23 @@ class ChronoboardView extends ItemView {
 
     wrapper.createDiv({ cls: "chronoboard-day-left-head", text: "Task" });
     const hoursHead = wrapper.createDiv({ cls: "chronoboard-day-hours-head" });
-    hoursHead.style.setProperty("--chronoboard-hour-count", String(this.getVisibleHourCount()));
     const timelineWidth = Math.max((panel.getBoundingClientRect().width || 0) - 221, this.getVisibleHourCount() * 84);
     const dayHourWidth = timelineWidth / this.getVisibleHourCount();
-    hoursHead.style.width = `${timelineWidth}px`;
-    hoursHead.style.setProperty("--chronoboard-day-hour-width", `${dayHourWidth}px`);
-    this.renderHourMarkers(hoursHead, true, null, dayHourWidth);
+    const hoursTrack = hoursHead.createDiv({ cls: "chronoboard-day-hours-track" });
+    hoursTrack.style.width = `${timelineWidth}px`;
+    hoursTrack.style.setProperty("--chronoboard-hour-count", String(this.getVisibleHourCount()));
+    hoursTrack.style.setProperty("--chronoboard-day-hour-width", `${dayHourWidth}px`);
+    this.renderHourMarkers(hoursTrack, true, null, dayHourWidth);
 
     const taskColumn = wrapper.createDiv({ cls: "chronoboard-day-task-column" });
     const gridColumn = wrapper.createDiv({ cls: "chronoboard-day-grid-column" });
+    const gridContent = gridColumn.createDiv({ cls: "chronoboard-day-grid-content" });
+    gridContent.style.width = `${timelineWidth}px`;
+    this.syncScrollPair(taskColumn, gridColumn, "vertical");
+    this.syncScrollPair(hoursHead, gridColumn, "horizontal");
 
     if (!selectedTasks.length) {
-      gridColumn.createDiv({
+      gridContent.createDiv({
         cls: "chronoboard-empty",
         text: "Add a task on the left to start logging time."
       });
@@ -1127,10 +1808,14 @@ class ChronoboardView extends ItemView {
         this.selectedTaskPath = task.path;
         await this.render();
       });
+      taskCard.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.openTask(task);
+      });
       taskCard.addEventListener("contextmenu", (event) => this.openTicketContextMenu(event, task));
 
-      const row = gridColumn.createDiv({ cls: "chronoboard-day-row" });
-      row.style.width = `${timelineWidth}px`;
+      const row = gridContent.createDiv({ cls: "chronoboard-day-row" });
       row.style.setProperty("--chronoboard-day-hour-width", `${dayHourWidth}px`);
       row.addEventListener("mousedown", (event) => this.handleDayMouseDown(event, task, selectedDay, row));
 
@@ -1307,6 +1992,23 @@ class ChronoboardView extends ItemView {
       });
   }
 
+  syncScrollPair(first, second, axis) {
+    let syncing = false;
+    const property = axis === "horizontal" ? "scrollLeft" : "scrollTop";
+    const sync = (source, target) => {
+      if (syncing) {
+        return;
+      }
+      syncing = true;
+      target[property] = source[property];
+      window.requestAnimationFrame(() => {
+        syncing = false;
+      });
+    };
+    first.addEventListener("scroll", () => sync(first, second));
+    second.addEventListener("scroll", () => sync(second, first));
+  }
+
   renderHourMarkers(container, horizontal, verticalHeight = null, horizontalWidth = null) {
     const start = this.plugin.settings.visibleStartHour;
     const end = this.plugin.settings.visibleEndHour;
@@ -1404,7 +2106,7 @@ class ChronoboardView extends ItemView {
       this.startResizeDrag(event, task, entry, index, horizontal, "end", container);
     });
     block.addEventListener("click", async (event) => {
-      if (event.button !== 0 || event.detail !== 4) {
+      if (event.button !== 0 || event.detail !== 2) {
         return;
       }
       event.preventDefault();
@@ -1420,7 +2122,7 @@ class ChronoboardView extends ItemView {
       this.activeContextMenu = menu;
       menu.addItem((item) =>
         item
-          .setTitle("Open ticket note")
+          .setTitle("Open task")
           .setIcon("file-text")
           .onClick(async () => {
             await this.app.workspace.getLeaf("tab").openFile(task.file);
@@ -1434,13 +2136,13 @@ class ChronoboardView extends ItemView {
       );
       menu.addItem((item) =>
         item
-          .setTitle("Edit ticket subtitle")
+          .setTitle("Edit task subtitle")
           .setIcon("text")
           .onClick(() => this.openSubtitleModal(task))
       );
       menu.addItem((item) =>
         item
-          .setTitle("Edit box notes")
+          .setTitle("Edit task block text")
           .setIcon("text-cursor-input")
           .onClick(() => {
             new TimeBoxTextModal(this.app, {
@@ -1457,7 +2159,7 @@ class ChronoboardView extends ItemView {
       );
       menu.addItem((item) =>
         item
-          .setTitle(entry.notePath ? "Open time subnote" : "Create time subnote")
+          .setTitle(this.resolveTimeEntryNote(entry) ? "Open time entry note" : "Create time entry note")
           .setIcon("sticky-note")
           .onClick(async () => {
             await this.openOrCreateTimeEntryNote(task, index, entry);
@@ -1487,6 +2189,7 @@ class ChronoboardView extends ItemView {
           })
       );
       menu.showAtMouseEvent(event);
+      this.decorateActiveMenu("Remove time block");
     });
   }
 
@@ -1572,16 +2275,53 @@ class ChronoboardView extends ItemView {
     }
   }
 
+  async openTask(task) {
+    await this.app.workspace.getLeaf("tab").openFile(task.file);
+  }
+
+  openSummarySortMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const menu = new Menu();
+    Object.entries(SUMMARY_SORT_OPTIONS).forEach(([key, label]) => {
+      menu.addItem((item) => {
+        item.setTitle(label);
+        if (this.currentSummarySort === key) {
+          item.setIcon("check");
+        }
+        item.onClick(async () => {
+          this.currentSummarySort = key;
+          await this.render();
+        });
+      });
+    });
+    menu.showAtMouseEvent(event);
+  }
+
   renderSummary(layout, selectedTasks) {
-    const scopedTasks = this.getScopedTasks(selectedTasks);
+    const scopedTasks = this.getSummarySortedTasks(selectedTasks);
     const panel = layout.createDiv({ cls: "chronoboard-panel" });
     const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
     panelHead.createDiv({
       text: this.currentMode === "day" ? "Daily Total" : this.currentMode === "month" ? "Monthly Total" : "Weekly Total"
     });
-    panelHead.createDiv({
+    const headMeta = panelHead.createDiv({ cls: "chronoboard-summary-head-meta" });
+    headMeta.createDiv({
       cls: "chronoboard-summary-head-total",
       text: formatHours(scopedTasks.reduce((sum, task) => sum + this.getSummaryMinutesForTask(task), 0))
+    });
+    const sortTrigger = headMeta.createSpan({ cls: "chronoboard-summary-sort-trigger" });
+    setIcon(sortTrigger, SUMMARY_SORT_ICONS[this.currentSummarySort] || SUMMARY_SORT_ICONS.status);
+    sortTrigger.setAttr("role", "button");
+    sortTrigger.setAttr("tabindex", "0");
+    sortTrigger.setAttr("aria-label", `Sort totals: ${SUMMARY_SORT_OPTIONS[this.currentSummarySort] || SUMMARY_SORT_OPTIONS.status}`);
+    sortTrigger.setAttr("title", `Sort totals: ${SUMMARY_SORT_OPTIONS[this.currentSummarySort] || SUMMARY_SORT_OPTIONS.status}`);
+    sortTrigger.addEventListener("click", (event) => this.openSummarySortMenu(event));
+    sortTrigger.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this.openSummarySortMenu(event);
+      }
     });
 
     if (this.rightPanelCollapsed) {
@@ -1617,6 +2357,11 @@ class ChronoboardView extends ItemView {
         this.selectedTaskPath = task.path;
         await this.render();
       });
+      card.addEventListener("dblclick", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await this.openTask(task);
+      });
       card.addEventListener("contextmenu", (event) => this.openTicketContextMenu(event, task));
     });
   }
@@ -1629,7 +2374,7 @@ class ChronoboardView extends ItemView {
     this.activeContextMenu = menu;
     menu.addItem((item) =>
       item
-        .setTitle("Open ticket note")
+        .setTitle("Open task")
         .setIcon("file-text")
         .onClick(async () => {
           await this.app.workspace.getLeaf("tab").openFile(task.file);
@@ -1643,7 +2388,7 @@ class ChronoboardView extends ItemView {
     );
     menu.addItem((item) =>
       item
-        .setTitle("Edit ticket subtitle")
+        .setTitle("Edit task subtitle")
         .setIcon("text")
         .onClick(() => this.openSubtitleModal(task))
     );
@@ -1668,7 +2413,7 @@ class ChronoboardView extends ItemView {
       );
     }
     menu.showAtMouseEvent(event);
-    this.decorateActiveMenu();
+    this.decorateActiveMenu("Remove Task");
   }
 
   closeActiveContextMenu() {
@@ -1679,7 +2424,7 @@ class ChronoboardView extends ItemView {
     document.querySelectorAll(".menu").forEach((element) => element.remove());
   }
 
-  decorateActiveMenu() {
+  decorateActiveMenu(removeLabel) {
     window.setTimeout(() => {
       const menus = [...document.querySelectorAll(".menu")];
       const menu = menus[menus.length - 1];
@@ -1687,7 +2432,7 @@ class ChronoboardView extends ItemView {
         return;
       }
       const items = [...menu.querySelectorAll(".menu-item")];
-      const removeItem = items.find((item) => item.textContent && item.textContent.includes("Remove Task"));
+      const removeItem = items.find((item) => item.textContent && item.textContent.includes(removeLabel));
       if (removeItem) {
         removeItem.classList.add("chronoboard-menu-remove-item");
       }
@@ -1695,6 +2440,8 @@ class ChronoboardView extends ItemView {
       const lastSeparator = separators[separators.length - 1];
       if (lastSeparator && removeItem) {
         lastSeparator.classList.add("chronoboard-menu-remove-separator");
+      } else if (removeItem) {
+        removeItem.classList.add("chronoboard-menu-remove-item-with-divider");
       }
     }, 0);
   }
@@ -1755,6 +2502,17 @@ class ChronoboardView extends ItemView {
       }
     }
 
+    const aliasedNote = this.plugin.findTimeEntryNoteById(entryId);
+    if (aliasedNote) {
+      await this.plugin.updateTimeEntry(task.file, entryIndex, {
+        ...entry,
+        id: entryId,
+        notePath: aliasedNote.path
+      });
+      await this.app.workspace.getLeaf("tab").openFile(aliasedNote);
+      return;
+    }
+
     const folder = this.plugin.settings.timeEntryNotesFolder;
     if (!this.app.vault.getAbstractFileByPath(folder)) {
       await this.app.vault.createFolder(folder);
@@ -1773,22 +2531,7 @@ class ChronoboardView extends ItemView {
       counter += 1;
     }
 
-    const body = [
-      "---",
-      `Date: ${moment().format("YYYY-MM-DD HH:mm")}`,
-      `Updated: ${moment().format("YYYY-MM-DD HH:mm")}`,
-      "aliases:",
-      `  - ${entryId}`,
-      "tags:",
-      "  - chronoboard",
-      `Links: "[[${task.file.basename}]]"`,
-      `ChronoboardEntryId: ${entryId}`,
-      `ChronoboardParent: "[[${task.file.basename}]]"`,
-      `ChronoboardStart: ${entry.startTime}`,
-      `ChronoboardEnd: ${entry.endTime}`,
-      "---",
-      ""
-    ].join("\n");
+    const body = await this.plugin.buildTimeEntryNoteContent(task, entryId, entry);
 
     const noteFile = await this.app.vault.create(filePath, body);
     await this.plugin.updateTimeEntry(task.file, entryIndex, {
@@ -1797,6 +2540,17 @@ class ChronoboardView extends ItemView {
       notePath: noteFile.path
     });
     await this.app.workspace.getLeaf("tab").openFile(noteFile);
+  }
+
+  resolveTimeEntryNote(entry) {
+    if (entry.notePath) {
+      const existing = this.app.vault.getAbstractFileByPath(entry.notePath);
+      if (existing instanceof TFile) {
+        return existing;
+      }
+    }
+    const entryId = entry?.id;
+    return entryId ? this.plugin.findTimeEntryNoteById(entryId) : null;
   }
 
   handleWeekMouseDown(event, selectedTask, dayMoment, column) {
@@ -2128,8 +2882,50 @@ module.exports = class ChronoboardPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "make-current-note-tasknotes-compatible",
-      name: "Add TaskNotes fields to current note",
+      id: "open-chronoboard-task-picker",
+      name: "Add task to Chronoboard",
+      callback: async () => this.showAddTaskModal()
+    });
+
+    this.addCommand({
+      id: "open-chronoboard-manual-time-entry",
+      name: "Open manual time entry",
+      callback: async () => this.showManualTimeEntryModal()
+    });
+
+    this.addCommand({
+      id: "open-selected-chronoboard-task",
+      name: "Open selected Chronoboard task",
+      checkCallback: (checking) => {
+        const path = this.getSelectedViewTaskPath();
+        if (!path) {
+          return false;
+        }
+        if (!checking) {
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (file instanceof TFile) {
+            this.app.workspace.getLeaf("tab").openFile(file);
+          }
+        }
+        return true;
+      }
+    });
+
+    this.addCommand({
+      id: "open-chronoboard-guide",
+      name: "Open Chronoboard guide",
+      callback: async () => this.openManagedNote(GUIDE_NOTE_PATH, true)
+    });
+
+    this.addCommand({
+      id: "open-chronoboard-changelog",
+      name: "Open Chronoboard changelog",
+      callback: async () => this.openManagedNote(CHANGELOG_NOTE_PATH, true)
+    });
+
+    this.addCommand({
+      id: "make-current-task-tasknotes-compatible",
+      name: "Add TaskNotes fields to current task",
       checkCallback: (checking) => {
         const file = this.app.workspace.getActiveFile();
         if (!(file instanceof TFile) || file.extension !== "md") {
@@ -2148,6 +2944,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", () => this.refreshAllViews()));
     this.registerEvent(this.app.vault.on("delete", () => this.refreshAllViews()));
     this.registerDomEvent(document, "keydown", (event) => this.handleUndoKeydown(event));
+    await this.initializeManagedNotes();
   }
 
   async onunload() {
@@ -2161,6 +2958,208 @@ module.exports = class ChronoboardPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async initializeManagedNotes() {
+    await this.ensureManagedNote(GUIDE_NOTE_PATH, this.buildGuideNoteContent());
+    await this.ensureChangelogNote();
+
+    const currentVersion = this.manifest.version;
+    const previousVersion = String(this.settings.lastSeenVersion || "").trim();
+    const isFirstRun = !previousVersion;
+    const isUpdate = Boolean(previousVersion) && previousVersion !== currentVersion;
+
+    if (this.settings.lastSeenVersion !== currentVersion) {
+      this.settings.lastSeenVersion = currentVersion;
+      await this.saveSettings();
+    }
+
+    if (isFirstRun) {
+      await this.openManagedNote(GUIDE_NOTE_PATH, false);
+      return;
+    }
+
+    if (isUpdate) {
+      await this.openManagedNote(CHANGELOG_NOTE_PATH, false);
+    }
+  }
+
+  async ensureManagedNote(path, content) {
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      const current = await this.app.vault.cachedRead(existing);
+      if (current !== content) {
+        await this.app.vault.modify(existing, content);
+      }
+      return existing;
+    }
+    return this.app.vault.create(path, content);
+  }
+
+  async openManagedNote(path, ensureFirst = false) {
+    if (ensureFirst) {
+      if (path === GUIDE_NOTE_PATH) {
+        await this.ensureManagedNote(path, this.buildGuideNoteContent());
+      } else if (path === CHANGELOG_NOTE_PATH) {
+        await this.ensureChangelogNote();
+      }
+    }
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (file instanceof TFile) {
+      await this.app.workspace.getLeaf("tab").openFile(file);
+    }
+  }
+
+  async ensureChangelogNote() {
+    const versionHeading = `## ${this.manifest.version}`;
+    const releaseSection = this.buildCurrentReleaseSection();
+    const existing = this.app.vault.getAbstractFileByPath(CHANGELOG_NOTE_PATH);
+    if (!(existing instanceof TFile)) {
+      return this.app.vault.create(CHANGELOG_NOTE_PATH, `${this.buildChangelogHeader()}\n\n${releaseSection}\n`);
+    }
+    const current = await this.app.vault.cachedRead(existing);
+    if (current.includes(versionHeading)) {
+      return existing;
+    }
+    const bodyWithoutHeader = current
+      .replace(/^# Chronoboard Changelog\s*/m, "")
+      .replace(/^This note is managed by Chronoboard and records release highlights, commands, fixes, and workflow clarifications\.\s*/m, "")
+      .trim();
+    const updated = `${this.buildChangelogHeader()}\n\n${releaseSection}${bodyWithoutHeader ? `\n\n${bodyWithoutHeader}` : ""}\n`;
+    await this.app.vault.modify(existing, updated);
+    return existing;
+  }
+
+  buildChangelogHeader() {
+    return [
+      "# Chronoboard Changelog",
+      "",
+      "This note is managed by Chronoboard and records release highlights, commands, fixes, and workflow clarifications."
+    ].join("\n");
+  }
+
+  buildGuideNoteContent() {
+    return [
+      "# Getting Started With Chronoboard",
+      "",
+      "> [!info] What Chronoboard Is",
+      "> Chronoboard is a task-native timeboard for Obsidian. It lets you pull tasks from a configured folder and place time visually in day, week, and month views.",
+      "",
+      "## Core workflow",
+      "",
+      "> [!tip] Task setup",
+      "> Tasks should usually have your configured status frontmatter, `Status` by default. That is what makes them available in the add-task pool unless they are explicitly included through `Always include tasks`.",
+      "",
+      "- Add tasks into the left task pool with `Add task to Chronoboard` or the `+ Add task` slot.",
+      "- Make sure the task file has the configured status frontmatter property before expecting it to appear in the task pool.",
+      "- Click a task in the left pool to select it, then click and drag in the board to create a time block.",
+      "- Hold and drag an existing time block to move it.",
+      "- Double click a time block to remove it.",
+      "- Use `Ctrl+Z` or `Cmd+Z` to undo adding or removing a time block.",
+      "",
+      "## Right click on a time block",
+      "",
+      "> [!example] Why this matters",
+      "> Task subtitles are useful when your main task name is a short identifier such as `ABC-123` and you still want a readable label on the board.",
+      "",
+      "- `Open task note`: opens the original task file.",
+      "- `Change color`: changes the color for that task everywhere Chronoboard displays it, including side panels.",
+      "- `Edit task subtitle`: adds a human-readable subtitle below the task key.",
+      "- `Edit task block text`: adds text inside that specific time block only.",
+      "- `Create time entry note` or `Open time entry note`: creates or opens a dedicated note for that time block. This note can be renamed because Chronoboard tracks it through the entry alias and ID.",
+      "- `Precise Edit Time`: lets you enter exact start and end times.",
+      "- `Remove time block`: removes the time block and removes that entry from the task frontmatter.",
+      "",
+      "## Right click on a task in the side panels",
+      "",
+      "- `Open task note`: opens the original task file.",
+      "- `Change color`: changes the color for all blocks and summary cards for that task.",
+      "- `Edit task subtitle`: adds an alternative human-readable name.",
+      "- `Remove Task`: removes that task from the left-side pool only. It does not remove any blocks already on the board, and it does not remove the task from totals if tracked time still exists in the current scope.",
+      "",
+      "## Important behavior",
+      "",
+      "> [!warning] Removing tasks from the left rail",
+      "> Removing a task from the left sidebar does not remove any time already tracked on the board. It only removes that task from the current left-side task pool.",
+      "",
+      "- Removing a task from the left sidebar does not remove its existing time entries from the board.",
+      "- If a task is removed from the sidebar but is not marked with an excluded status value, it can still appear in the add-task picker later.",
+      "- Double clicking opens tasks from the left task rail and totals rail.",
+      "",
+      "## Commands",
+      "",
+      "- `Open Chronoboard`",
+      "- `Add task to Chronoboard`",
+      "- `Open manual time entry`",
+      "- `Open selected Chronoboard task`",
+      "- `Open Chronoboard guide`",
+      "- `Open Chronoboard changelog`",
+      "- `Add TaskNotes fields to current task`",
+      "",
+      "## Settings overview",
+      "",
+      "- `Folder`: sets the folder Chronoboard reads tasks from.",
+      "- `Time entry notes folder`: sets where dedicated time entry notes are created.",
+      "- `Time entry note template`: optional template note used when creating time entry notes.",
+      "- `Metadata property`: changes which frontmatter property Chronoboard uses to filter available tasks.",
+      "- `Excluded values`: values that hide tasks from the add-task pool. By default this includes `finished`.",
+      "- `Always include tasks`: allows generic or static tasks, such as meetings, to stay available even without the main status property.",
+      "- `Hide weekends in week and month views`: hides Saturday and Sunday from those timeline views.",
+      "- `Visible start hour` and `Visible end hour`: control the working-day window shown in day and week views.",
+      "- `Highlight color`: changes the accent color used by Chronoboard controls.",
+      "- `Force dark text on colored cards`: helps readability on custom light-colored task cards and blocks.",
+      "",
+      "## Status frontmatter values",
+      "",
+      "Use these values in the configured `Status` frontmatter property.",
+      "",
+      "| Value | Color | Notes |",
+      "| --- | --- | --- |",
+      "| <span style=\"color:#4ea0ff;font-weight:700;\">In Progress</span> | `#4ea0ff` | Highest-priority active work |",
+      "| <span style=\"color:#2fb859;font-weight:700;\">Ongoing</span> | `#2fb859` | Continuous or recurring work |",
+      "| <span style=\"color:#d29119;font-weight:700;\">On Hold</span> | `#d29119` | Paused work |",
+      "| <span style=\"color:#9f63f2;font-weight:700;\">Upcoming</span> | `#9f63f2` | Planned work not yet started |",
+      "| `Finished` | excluded by default | Hidden from the add-task picker when `Excluded values` contains `finished` |"
+    ].join("\n");
+  }
+
+  buildCurrentReleaseSection() {
+    const version = this.manifest.version;
+    return [
+      `## ${version}`,
+      "",
+      "### Highlights",
+      "",
+      "- Added managed Chronoboard guide and changelog notes inside the vault.",
+      "- Added command palette actions for opening the guide and changelog.",
+      "- Added toolbar help access to open the Chronoboard guide quickly.",
+      "- Added clearer onboarding around status frontmatter, commands, undo, and interaction flow.",
+      "- Refined totals sorting controls and per-day header totals presentation.",
+      "- Improved time entry note handling so renamed notes reopen correctly through entry IDs and aliases.",
+      "- Added template support for time entry notes with Chronoboard-specific fields appended after template frontmatter.",
+      "",
+      "### Clarifications",
+      "",
+      "- Double click a time block to remove it.",
+      "- Hold and drag a time block to move it.",
+      "- Use `Ctrl+Z` or `Cmd+Z` to undo adding or removing a time block.",
+      "- Removing a task from the left rail does not remove existing time blocks from the board.",
+      "",
+      "### Commands",
+      "",
+      "- `Open Chronoboard`",
+      "- `Add task to Chronoboard`",
+      "- `Open manual time entry`",
+      "- `Open selected Chronoboard task`",
+      "- `Open Chronoboard guide`",
+      "- `Open Chronoboard changelog`",
+      "",
+      "### Roadmap",
+      "",
+      "- Additional mobile-specific usability improvements.",
+      "- More documentation and onboarding polish.",
+      "- Further manual time entry and totals workflow improvements."
+    ].join("\n");
   }
 
   pushUndoAction(action) {
@@ -2207,6 +3206,55 @@ module.exports = class ChronoboardPlugin extends Plugin {
         await leaf.view.refresh();
       }
     }
+  }
+
+  getOpenChronoboardView() {
+    const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+    return leaf?.view || null;
+  }
+
+  getSelectedViewTaskPath() {
+    const view = this.getOpenChronoboardView();
+    return view?.selectedTaskPath || this.settings.selectedTaskPaths?.[0] || null;
+  }
+
+  async showAddTaskModal() {
+    const excludePaths = [
+      ...(this.settings.staticTaskPaths || []),
+      ...(this.settings.selectedTaskPaths || [])
+    ];
+    new TaskPickerModal(this.app, this, {
+      excludePaths,
+      onChoose: async (task) => {
+        this.settings.selectedTaskPaths = [...this.settings.selectedTaskPaths, task.path];
+        this.settings.boardOnlyTaskPaths = (this.settings.boardOnlyTaskPaths || []).filter((path) => path !== task.path);
+        const view = this.getOpenChronoboardView();
+        if (view) {
+          view.selectedTaskPath = task.path;
+        }
+        await this.saveSettings();
+        await this.refreshAllViews();
+      }
+    }).open();
+  }
+
+  async showManualTimeEntryModal() {
+    const defaultTaskPath = this.getSelectedViewTaskPath();
+    new ManualTimeEntryModal(this.app, this, {
+      defaultTaskPath,
+      onComplete: async (taskPath) => {
+        if (taskPath && !this.settings.selectedTaskPaths.includes(taskPath) && !(this.settings.staticTaskPaths || []).includes(taskPath)) {
+          this.settings.selectedTaskPaths = [...this.settings.selectedTaskPaths, taskPath];
+          this.settings.boardOnlyTaskPaths = (this.settings.boardOnlyTaskPaths || []).filter((path) => path !== taskPath);
+          await this.saveSettings();
+        }
+        const view = this.getOpenChronoboardView();
+        if (view && taskPath) {
+          view.selectedTaskPath = taskPath;
+        }
+        await this.refreshAllViews();
+      }
+    }).open();
   }
 
   async getAvailableTasks() {
@@ -2262,7 +3310,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
     const filterValues = normalizeStatusList(rawFilter);
     const status = filterValues[0] || "ongoing";
     const timeEntries = Array.isArray(frontmatter.timeEntries) ? frontmatter.timeEntries.filter((entry) => entry && entry.startTime && entry.endTime) : [];
-    const activeValue = frontmatter[this.settings.activeProperty];
     return {
       file,
       path: file.path,
@@ -2272,7 +3319,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
       rawStatus: rawFilter,
       filterValues,
       timeEntries,
-      active: activeValue === true || activeValue === "true",
       color: normalizeHexColor(frontmatter[this.settings.colorProperty] || ""),
       subtitle: String(frontmatter[this.settings.subtitleProperty] || "").trim()
     };
@@ -2289,6 +3335,107 @@ module.exports = class ChronoboardPlugin extends Plugin {
       return title;
     }
     return "";
+  }
+
+  getTaskLabel(task) {
+    const key = String(task?.jiraKey || task?.file?.basename || "").trim();
+    const secondary = this.getTaskSecondaryText(task);
+    return secondary ? `${key} • ${secondary}` : key;
+  }
+
+  findTimeEntryNoteById(entryId) {
+    const normalizedId = String(entryId || "").trim();
+    if (!normalizedId) {
+      return null;
+    }
+    const folderPrefix = `${this.settings.timeEntryNotesFolder}/`;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (!file.path.startsWith(folderPrefix)) {
+        continue;
+      }
+      const cache = this.app.metadataCache.getFileCache(file) || {};
+      const frontmatter = cache.frontmatter || {};
+      const aliases = frontmatter.aliases;
+      const aliasValues = Array.isArray(aliases)
+        ? aliases.map((value) => String(value || "").trim())
+        : typeof aliases === "string"
+          ? [String(aliases).trim()]
+          : [];
+      if (aliasValues.includes(normalizedId) || String(frontmatter.ChronoboardEntryId || "").trim() === normalizedId) {
+        return file;
+      }
+    }
+    return null;
+  }
+
+  resolveVaultMarkdownFile(pathLike) {
+    const rawPath = String(pathLike || "").trim();
+    if (!rawPath) {
+      return null;
+    }
+    const direct = this.app.vault.getAbstractFileByPath(rawPath);
+    if (direct instanceof TFile) {
+      return direct;
+    }
+    const markdownPath = rawPath.endsWith(".md") ? rawPath : `${rawPath}.md`;
+    const withExtension = this.app.vault.getAbstractFileByPath(markdownPath);
+    if (withExtension instanceof TFile) {
+      return withExtension;
+    }
+    const linked = this.app.metadataCache.getFirstLinkpathDest(rawPath, "");
+    if (linked instanceof TFile) {
+      return linked;
+    }
+    const linkedWithExtension = this.app.metadataCache.getFirstLinkpathDest(markdownPath, "");
+    if (linkedWithExtension instanceof TFile) {
+      return linkedWithExtension;
+    }
+    return null;
+  }
+
+  async buildTimeEntryNoteContent(task, entryId, entry) {
+    let templateContent = "";
+    const templatePath = String(this.settings.timeEntryNoteTemplate || "").trim();
+    if (templatePath) {
+      const templateFile = this.resolveVaultMarkdownFile(templatePath);
+      if (templateFile instanceof TFile) {
+        templateContent = await this.app.vault.cachedRead(templateFile);
+      } else {
+        new Notice(`Chronoboard template not found: ${templatePath}`);
+      }
+    }
+
+    const { frontmatterLines } = splitFrontmatter(templateContent);
+    const reservedKeys = new Set([
+      "aliases",
+      "links",
+      "chronoboardentryid",
+      "chronoboardparent",
+      "chronoboardstart",
+      "chronoboardend"
+    ]);
+    const sanitizedTemplateFrontmatter = frontmatterLines.filter((line) => {
+      const key = normalizeFrontmatterKey(line);
+      return !key || !reservedKeys.has(key);
+    });
+    const chronoFrontmatterLines = [
+      "aliases:",
+      `  - ${entryId}`,
+      `Links: "[[${task.file.basename}]]"`,
+      `ChronoboardEntryId: ${entryId}`,
+      `ChronoboardParent: "[[${task.file.basename}]]"`,
+      `ChronoboardStart: ${entry.startTime}`,
+      `ChronoboardEnd: ${entry.endTime}`
+    ];
+
+    const mergedFrontmatter = [
+      "---",
+      ...sanitizedTemplateFrontmatter,
+      ...chronoFrontmatterLines,
+      "---"
+    ].join("\n");
+
+    return `${mergedFrontmatter}\n`;
   }
 
   extractTags(frontmatter) {
@@ -2331,9 +3478,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
         if (!frontmatter.status) {
           frontmatter.status = "in-progress";
         }
-        if (frontmatter[this.settings.activeProperty] === undefined) {
-          frontmatter[this.settings.activeProperty] = true;
-        }
         if (!Array.isArray(frontmatter.timeEntries)) {
           frontmatter.timeEntries = [];
         }
@@ -2345,7 +3489,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
       await this.refreshAllViews();
     } catch (error) {
       console.error(error);
-      new Notice("Failed to update note frontmatter");
+      new Notice("Failed to update task frontmatter");
     }
   }
 
@@ -2362,9 +3506,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
       existing.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
       storedIndex = existing.findIndex((candidate) => candidate.id === storedEntry.id);
       frontmatter.timeEntries = existing;
-      if (frontmatter[this.settings.activeProperty] === undefined) {
-        frontmatter[this.settings.activeProperty] = true;
-      }
     });
     if (options.pushUndo && storedEntry) {
       this.pushUndoAction({
