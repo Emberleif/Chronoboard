@@ -52,12 +52,10 @@ const DEFAULT_SETTINGS = {
   colorProperty: "timeboardColor",
   subtitleProperty: "timeboardSubtitle",
   highlightColor: "",
-  forceDarkTextOnColored: false,
-  lastSeenVersion: ""
+  forceDarkTextOnColored: false
 };
 
 const GUIDE_NOTE_PATH = "Getting Started With Chronoboard.md";
-const CHANGELOG_NOTE_PATH = "Chronoboard - Changelog.md";
 
 function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
@@ -1345,12 +1343,12 @@ class ChronoboardView extends ItemView {
     helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
     helpTrigger.setAttr("title", "Open Chronoboard guide");
     helpTrigger.addEventListener("click", async () => {
-      await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+      await this.plugin.openGuideNote();
     });
     helpTrigger.addEventListener("keydown", async (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+        await this.plugin.openGuideNote();
       }
     });
 
@@ -1453,12 +1451,12 @@ class ChronoboardView extends ItemView {
     helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
     helpTrigger.setAttr("title", "Open Chronoboard guide");
     helpTrigger.addEventListener("click", async () => {
-      await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+      await this.plugin.openGuideNote();
     });
     helpTrigger.addEventListener("keydown", async (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        await this.plugin.openManagedNote(GUIDE_NOTE_PATH, true);
+        await this.plugin.openGuideNote();
       }
     });
     const list = panel.createDiv({ cls: "chronoboard-mobile-task-list" });
@@ -2914,13 +2912,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.addCommand({
       id: "open-chronoboard-guide",
       name: "Open Chronoboard guide",
-      callback: async () => this.openManagedNote(GUIDE_NOTE_PATH, true)
-    });
-
-    this.addCommand({
-      id: "open-chronoboard-changelog",
-      name: "Open Chronoboard changelog",
-      callback: async () => this.openManagedNote(CHANGELOG_NOTE_PATH, true)
+      callback: async () => this.openGuideNote()
     });
 
     this.addCommand({
@@ -2944,7 +2936,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.registerEvent(this.app.vault.on("rename", () => this.refreshAllViews()));
     this.registerEvent(this.app.vault.on("delete", () => this.refreshAllViews()));
     this.registerDomEvent(document, "keydown", (event) => this.handleUndoKeydown(event));
-    await this.initializeManagedNotes();
   }
 
   async onunload() {
@@ -2960,88 +2951,17 @@ module.exports = class ChronoboardPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async initializeManagedNotes() {
-    await this.ensureManagedNote(GUIDE_NOTE_PATH, this.buildGuideNoteContent());
-    await this.ensureChangelogNote();
-
-    const currentVersion = this.manifest.version;
-    const previousVersion = String(this.settings.lastSeenVersion || "").trim();
-    const isFirstRun = !previousVersion;
-    const isUpdate = Boolean(previousVersion) && previousVersion !== currentVersion;
-
-    if (this.settings.lastSeenVersion !== currentVersion) {
-      this.settings.lastSeenVersion = currentVersion;
-      await this.saveSettings();
+  async openGuideNote() {
+    const existing = this.app.vault.getAbstractFileByPath(GUIDE_NOTE_PATH);
+    let file = existing instanceof TFile ? existing : null;
+    if (!file) {
+      file = await this.app.vault.create(GUIDE_NOTE_PATH, this.buildGuideNoteContent());
     }
-
-    if (isFirstRun) {
-      await this.openManagedNote(GUIDE_NOTE_PATH, false);
-      return;
-    }
-
-    if (isUpdate) {
-      await this.openManagedNote(CHANGELOG_NOTE_PATH, false);
-    }
-  }
-
-  async ensureManagedNote(path, content) {
-    const existing = this.app.vault.getAbstractFileByPath(path);
-    if (existing instanceof TFile) {
-      const current = await this.app.vault.cachedRead(existing);
-      if (current !== content) {
-        await this.app.vault.modify(existing, content);
-      }
-      return existing;
-    }
-    return this.app.vault.create(path, content);
-  }
-
-  async openManagedNote(path, ensureFirst = false) {
-    if (ensureFirst) {
-      if (path === GUIDE_NOTE_PATH) {
-        await this.ensureManagedNote(path, this.buildGuideNoteContent());
-      } else if (path === CHANGELOG_NOTE_PATH) {
-        await this.ensureChangelogNote();
-      }
-    }
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (file instanceof TFile) {
-      await this.app.workspace.getLeaf("tab").openFile(file);
-    }
-  }
-
-  async ensureChangelogNote() {
-    const versionHeading = `## ${this.manifest.version}`;
-    const releaseSection = this.buildCurrentReleaseSection();
-    const existing = this.app.vault.getAbstractFileByPath(CHANGELOG_NOTE_PATH);
-    if (!(existing instanceof TFile)) {
-      return this.app.vault.create(CHANGELOG_NOTE_PATH, `${this.buildChangelogHeader()}\n\n${releaseSection}\n`);
-    }
-    const current = await this.app.vault.cachedRead(existing);
-    if (current.includes(versionHeading)) {
-      return existing;
-    }
-    const bodyWithoutHeader = current
-      .replace(/^# Chronoboard Changelog\s*/m, "")
-      .replace(/^This note is managed by Chronoboard and records release highlights, commands, fixes, and workflow clarifications\.\s*/m, "")
-      .trim();
-    const updated = `${this.buildChangelogHeader()}\n\n${releaseSection}${bodyWithoutHeader ? `\n\n${bodyWithoutHeader}` : ""}\n`;
-    await this.app.vault.modify(existing, updated);
-    return existing;
-  }
-
-  buildChangelogHeader() {
-    return [
-      "# Chronoboard Changelog",
-      "",
-      "This note is managed by Chronoboard and records release highlights, commands, fixes, and workflow clarifications."
-    ].join("\n");
+    await this.app.workspace.getLeaf("tab").openFile(file);
   }
 
   buildGuideNoteContent() {
     return [
-      "# Getting Started With Chronoboard",
-      "",
       "> [!info] What Chronoboard Is",
       "> Chronoboard is a task-native timeboard for Obsidian. It lets you pull tasks from a configured folder and place time visually in day, week, and month views.",
       "",
@@ -3049,17 +2969,26 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "",
       "> [!tip] Task setup",
       "> Tasks should usually have your configured status frontmatter, `Status` by default. That is what makes them available in the add-task pool unless they are explicitly included through `Always include tasks`.",
-      "",
       "- Add tasks into the left task pool with `Add task to Chronoboard` or the `+ Add task` slot.",
       "- Make sure the task file has the configured status frontmatter property before expecting it to appear in the task pool.",
       "- Click a task in the left pool to select it, then click and drag in the board to create a time block.",
       "- Hold and drag an existing time block to move it.",
       "- Double click a time block to remove it.",
       "- Use `Ctrl+Z` or `Cmd+Z` to undo adding or removing a time block.",
+      "## Status frontmatter values",
+      "- Use these values in the configured `Status` frontmatter property.",
+      "",
+      "| Value                                                           | Color               | Notes                                                                      |",
+      "| --------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------- |",
+      "| <span style=\"color:#4ea0ff;font-weight:700;\">In Progress</span> | `#4ea0ff`           | Highest-priority active work                                               |",
+      "| <span style=\"color:#2fb859;font-weight:700;\">Ongoing</span>     | `#2fb859`           | Continuous or recurring work                                               |",
+      "| <span style=\"color:#d29119;font-weight:700;\">On Hold</span>     | `#d29119`           | Paused work                                                                |",
+      "| <span style=\"color:#9f63f2;font-weight:700;\">Upcoming</span>    | `#9f63f2`           | Planned work not yet started                                               |",
+      "| `Finished`                                                      | excluded by default | Hidden from the add-task picker when `Excluded values` contains `finished` |",
       "",
       "## Right click on a time block",
       "",
-      "> [!example] Why this matters",
+      "> [!example] Why subtitles help",
       "> Task subtitles are useful when your main task name is a short identifier such as `ABC-123` and you still want a readable label on the board.",
       "",
       "- `Open task note`: opens the original task file.",
@@ -3093,7 +3022,6 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "- `Open manual time entry`",
       "- `Open selected Chronoboard task`",
       "- `Open Chronoboard guide`",
-      "- `Open Chronoboard changelog`",
       "- `Add TaskNotes fields to current task`",
       "",
       "## Settings overview",
@@ -3107,58 +3035,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "- `Hide weekends in week and month views`: hides Saturday and Sunday from those timeline views.",
       "- `Visible start hour` and `Visible end hour`: control the working-day window shown in day and week views.",
       "- `Highlight color`: changes the accent color used by Chronoboard controls.",
-      "- `Force dark text on colored cards`: helps readability on custom light-colored task cards and blocks.",
-      "",
-      "## Status frontmatter values",
-      "",
-      "Use these values in the configured `Status` frontmatter property.",
-      "",
-      "| Value | Color | Notes |",
-      "| --- | --- | --- |",
-      "| <span style=\"color:#4ea0ff;font-weight:700;\">In Progress</span> | `#4ea0ff` | Highest-priority active work |",
-      "| <span style=\"color:#2fb859;font-weight:700;\">Ongoing</span> | `#2fb859` | Continuous or recurring work |",
-      "| <span style=\"color:#d29119;font-weight:700;\">On Hold</span> | `#d29119` | Paused work |",
-      "| <span style=\"color:#9f63f2;font-weight:700;\">Upcoming</span> | `#9f63f2` | Planned work not yet started |",
-      "| `Finished` | excluded by default | Hidden from the add-task picker when `Excluded values` contains `finished` |"
-    ].join("\n");
-  }
-
-  buildCurrentReleaseSection() {
-    const version = this.manifest.version;
-    return [
-      `## ${version}`,
-      "",
-      "### Highlights",
-      "",
-      "- Added managed Chronoboard guide and changelog notes inside the vault.",
-      "- Added command palette actions for opening the guide and changelog.",
-      "- Added toolbar help access to open the Chronoboard guide quickly.",
-      "- Added clearer onboarding around status frontmatter, commands, undo, and interaction flow.",
-      "- Refined totals sorting controls and per-day header totals presentation.",
-      "- Improved time entry note handling so renamed notes reopen correctly through entry IDs and aliases.",
-      "- Added template support for time entry notes with Chronoboard-specific fields appended after template frontmatter.",
-      "",
-      "### Clarifications",
-      "",
-      "- Double click a time block to remove it.",
-      "- Hold and drag a time block to move it.",
-      "- Use `Ctrl+Z` or `Cmd+Z` to undo adding or removing a time block.",
-      "- Removing a task from the left rail does not remove existing time blocks from the board.",
-      "",
-      "### Commands",
-      "",
-      "- `Open Chronoboard`",
-      "- `Add task to Chronoboard`",
-      "- `Open manual time entry`",
-      "- `Open selected Chronoboard task`",
-      "- `Open Chronoboard guide`",
-      "- `Open Chronoboard changelog`",
-      "",
-      "### Roadmap",
-      "",
-      "- Additional mobile-specific usability improvements.",
-      "- More documentation and onboarding polish.",
-      "- Further manual time entry and totals workflow improvements."
+      "- `Force dark text on colored cards`: helps readability on custom light-colored task cards and blocks."
     ].join("\n");
   }
 

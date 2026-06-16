@@ -1288,6 +1288,12 @@
 
 @media (max-width: 1200px) {
   .chronoboard-layout {
+    grid-template-columns: 180px minmax(0, 1fr) 180px;
+  }
+}
+
+@media (max-width: 900px) {
+  .chronoboard-layout {
     grid-template-columns: 1fr;
   }
 
