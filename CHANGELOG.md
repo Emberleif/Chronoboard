@@ -1,5 +1,27 @@
 # Chronoboard Changelog
 
+## 0.8.0
+
+### Added
+
+- Added a CSV export modal with a date range, task selection, per-task totals, a saved vault folder, and duplicate-file validation.
+- Added an `Export tracked time as CSV` command.
+- Added compressed CSV output with tasks in columns, dates in rows, and totals in the second row.
+
+### Changed
+
+- The question mark and the `Open Chronoboard guide` command now show help in a modal.
+- The `Stats`, `Task`, and `Totals` controls now use the accent color only when they are active.
+- The Stats control now returns to the week view when it is selected again.
+- Export tasks are now sorted from most tracked time to least tracked time.
+
+### Fixed
+
+- Chronoboard no longer creates a getting started note or a changelog note in the vault.
+- Chronoboard no longer opens a guide or changelog during startup.
+- The export task list now updates only after the user selects a date.
+- Removed divider lines from the CSV export modal.
+
 ## 0.7.0
 
 ### Added

@@ -277,34 +277,51 @@
   color: var(--text-normal);
 }
 
-.chronoboard-collapse-button {
+.chronoboard-collapse-button,
+.chronoboard-toolbar-state-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-primary);
   color: var(--text-muted);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 0 8px;
   font-size: 11px;
   cursor: pointer;
 }
 
-.chronoboard-collapse-button:hover {
+.chronoboard-collapse-button:hover,
+.chronoboard-toolbar-state-button:hover,
+.chronoboard-toolbar-export-button:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 
-.chronoboard-stats-button {
-  border: 1px solid color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 55%, black);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 92%, white), var(--chronoboard-highlight, var(--interactive-accent)));
+.chronoboard-toolbar-state-button.is-active {
+  border-color: var(--chronoboard-highlight, var(--interactive-accent));
+  background: var(--chronoboard-highlight, var(--interactive-accent));
   color: var(--text-on-accent);
+}
+
+.chronoboard-toolbar-export-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-muted);
   border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 600;
   cursor: pointer;
 }
 
-.chronoboard-stats-button.is-active {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+.chronoboard-toolbar-export-button svg {
+  width: 15px;
+  height: 15px;
 }
 
 .chronoboard-add-slot {
@@ -608,6 +625,141 @@
 .chronoboard-modal-textarea {
   min-height: 140px;
   resize: vertical;
+}
+
+.chronoboard-guide-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+}
+
+.chronoboard-guide-modal .modal-content {
+  padding-right: 4px;
+}
+
+.chronoboard-guide-content {
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  padding-right: 16px;
+}
+
+.chronoboard-guide-content > :first-child {
+  margin-top: 0;
+}
+
+.chronoboard-guide-content table {
+  width: 100%;
+}
+
+.chronoboard-export-modal {
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+  --setting-items-border-width: 0;
+}
+
+.chronoboard-export-modal .modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: min(760px, calc(100vh - 120px));
+  overflow: hidden;
+}
+
+.chronoboard-export-controls,
+.chronoboard-export-output {
+  flex: 0 0 auto;
+}
+
+.chronoboard-export-modal .setting-item {
+  border: 0 !important;
+  box-shadow: none !important;
+  background-image: none !important;
+}
+
+.chronoboard-export-modal .setting-item::before,
+.chronoboard-export-modal .setting-item::after {
+  display: none !important;
+}
+
+.chronoboard-export-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 0 8px;
+}
+
+.chronoboard-export-section-title {
+  margin: 0;
+  font-size: var(--font-ui-medium);
+}
+
+.chronoboard-export-range-count {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+}
+
+.chronoboard-export-range-count.is-error {
+  color: var(--text-error);
+}
+
+.chronoboard-export-task-list {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 8px;
+  background: var(--background-primary-alt);
+}
+
+.chronoboard-export-task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 24px 8px 10px;
+  border-bottom: 0;
+}
+
+.chronoboard-export-task-checkbox {
+  margin: 0;
+  accent-color: var(--interactive-accent);
+}
+
+.chronoboard-export-task-label {
+  min-width: 0;
+}
+
+.chronoboard-export-task-total {
+  font-weight: 700;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+
+.chronoboard-export-output {
+  margin-top: 12px;
+  padding-top: 4px;
+  border-top: 0;
+}
+
+.chronoboard-export-status {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chronoboard-export-status.is-error {
+  color: var(--text-error);
+}
+
+.chronoboard-export-actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0;
+  background: var(--background-primary);
 }
 
 .chronoboard-color-picker-wrap {

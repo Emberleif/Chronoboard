@@ -1,5 +1,6 @@
 const {
   ItemView,
+  MarkdownRenderer,
   Menu,
   Modal,
   Notice,
@@ -7,6 +8,7 @@ const {
   PluginSettingTab,
   Setting,
   TFile,
+  TFolder,
   setIcon,
   moment,
 } = require("obsidian");
@@ -52,10 +54,10 @@ const DEFAULT_SETTINGS = {
   colorProperty: "timeboardColor",
   subtitleProperty: "timeboardSubtitle",
   highlightColor: "",
-  forceDarkTextOnColored: false
+  forceDarkTextOnColored: false,
+  exportFolder: "Chronoboard Exports",
+  compressedCsvExport: false
 };
-
-const GUIDE_NOTE_PATH = "Getting Started With Chronoboard.md";
 
 function normalizeStatus(value) {
   return String(value || "").trim().toLowerCase();
@@ -258,8 +260,48 @@ function sanitizeFileSegment(value) {
     .trim();
 }
 
+function normalizeVaultFolder(value) {
+  const parts = String(value || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter((part) => part && part !== ".");
+  if (parts.includes("..")) {
+    return null;
+  }
+  return parts.join("/");
+}
+
+function escapeCsvValue(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
 function createEntryId() {
   return `chrono-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+class ChronoboardGuideModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+  }
+
+  async onOpen() {
+    this.modalEl.addClass("chronoboard-guide-modal");
+    this.titleEl.setText("Getting Started With Chronoboard");
+    const guide = this.contentEl.createDiv({ cls: "chronoboard-guide-content" });
+    await MarkdownRenderer.render(
+      this.app,
+      this.plugin.buildGuideContent(),
+      guide,
+      "",
+      this.plugin
+    );
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
 }
 
 class TaskPickerModal extends Modal {
@@ -717,6 +759,248 @@ class ManualTimeEntryModal extends Modal {
     });
 
     cancelButton.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class CsvExportModal extends Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.startDate = options.startDate || moment().startOf("isoWeek").format("YYYY-MM-DD");
+    this.endDate = options.endDate || moment().endOf("isoWeek").format("YYYY-MM-DD");
+    this.exportFolder = String(plugin.settings.exportFolder ?? "Chronoboard Exports");
+    this.compressedMode = Boolean(plugin.settings.compressedCsvExport);
+    this.fileName = this.getDefaultFileName();
+    this.exportTasks = [];
+    this.selectedTaskPaths = new Set();
+    this.refreshToken = 0;
+  }
+
+  getDefaultFileName() {
+    return `Chronoboard ${this.startDate} to ${this.endDate}.csv`;
+  }
+
+  getOutputPath() {
+    const folder = normalizeVaultFolder(this.exportFolder);
+    if (folder === null) {
+      return null;
+    }
+    const safeName = sanitizeFileSegment(String(this.fileName || "").replace(/\.csv$/i, ""));
+    if (!safeName) {
+      return null;
+    }
+    const fileName = `${safeName}.csv`;
+    return folder ? `${folder}/${fileName}` : fileName;
+  }
+
+  hasValidRange() {
+    const start = moment(this.startDate, "YYYY-MM-DD", true);
+    const end = moment(this.endDate, "YYYY-MM-DD", true);
+    return start.isValid() && end.isValid() && !start.isAfter(end, "day");
+  }
+
+  async onOpen() {
+    const { contentEl, titleEl } = this;
+    this.modalEl.addClass("chronoboard-export-modal");
+    titleEl.setText("Export tracked time");
+    contentEl.empty();
+
+    const controls = contentEl.createDiv({ cls: "chronoboard-export-controls" });
+    new Setting(controls)
+      .setName("Start date")
+      .setDesc("Include time on and after this date.")
+      .addText((text) => {
+        text.setValue(this.startDate);
+        text.inputEl.type = "date";
+        text.inputEl.addEventListener("change", async () => {
+          this.startDate = text.inputEl.value;
+          this.fileName = this.getDefaultFileName();
+          this.fileNameControl?.setValue(this.fileName);
+          await this.refreshTaskList();
+        });
+      });
+
+    new Setting(controls)
+      .setName("End date")
+      .setDesc("Include time on and before this date.")
+      .addText((text) => {
+        text.setValue(this.endDate);
+        text.inputEl.type = "date";
+        text.inputEl.addEventListener("change", async () => {
+          this.endDate = text.inputEl.value;
+          this.fileName = this.getDefaultFileName();
+          this.fileNameControl?.setValue(this.fileName);
+          await this.refreshTaskList();
+        });
+      });
+
+    const taskHeading = contentEl.createDiv({ cls: "chronoboard-export-section-head" });
+    taskHeading.createEl("h3", { cls: "chronoboard-export-section-title", text: "Tasks in Range" });
+    this.rangeStatusEl = taskHeading.createSpan({ cls: "chronoboard-export-range-count" });
+    this.taskListEl = contentEl.createDiv({ cls: "chronoboard-export-task-list" });
+
+    const output = contentEl.createDiv({ cls: "chronoboard-export-output" });
+    new Setting(output)
+      .setName("Compressed mode")
+      .setDesc("Put tasks in columns and dates in rows. The second row contains totals for the full range.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.compressedMode);
+        toggle.onChange((value) => {
+          this.compressedMode = value;
+        });
+      });
+
+    new Setting(output)
+      .setName("Export folder")
+      .setDesc("Use a vault-relative folder. Leave this field empty to use the vault root.")
+      .addText((text) => {
+        text.setPlaceholder("Chronoboard Exports").setValue(this.exportFolder);
+        text.onChange((value) => {
+          this.exportFolder = value;
+          this.updateExportState();
+        });
+      });
+
+    new Setting(output)
+      .setName("File name")
+      .setDesc("Chronoboard adds the CSV extension.")
+      .addText((text) => {
+        this.fileNameControl = text;
+        text.setValue(this.fileName);
+        text.onChange((value) => {
+          this.fileName = value;
+          this.updateExportState();
+        });
+      });
+
+    this.pathStatusEl = output.createDiv({ cls: "chronoboard-export-status" });
+    const actions = contentEl.createDiv({ cls: "chronoboard-export-actions" });
+    const cancelButton = actions.createEl("button", { text: "Cancel" });
+    this.exportButton = actions.createEl("button", { cls: "mod-cta", text: "Export CSV" });
+    cancelButton.addEventListener("click", () => this.close());
+    this.exportButton.addEventListener("click", async () => this.exportCsv());
+
+    await this.refreshTaskList();
+  }
+
+  async refreshTaskList() {
+    const token = ++this.refreshToken;
+    this.taskListEl.empty();
+    if (!this.hasValidRange()) {
+      this.exportTasks = [];
+      this.selectedTaskPaths.clear();
+      this.rangeStatusEl.setText("The start date must not be after the end date.");
+      this.rangeStatusEl.addClass("is-error");
+      this.taskListEl.createDiv({ cls: "chronoboard-modal-empty", text: "Enter a valid date range." });
+      this.updateExportState();
+      return;
+    }
+
+    this.rangeStatusEl.removeClass("is-error");
+    this.rangeStatusEl.setText("Loading tasks...");
+    const tasks = await this.plugin.getExportTasksInRange(this.startDate, this.endDate);
+    if (token !== this.refreshToken) {
+      return;
+    }
+    this.exportTasks = tasks;
+    this.selectedTaskPaths = new Set(tasks.map((item) => item.task.path));
+    this.rangeStatusEl.setText(`${tasks.length} task${tasks.length === 1 ? "" : "s"} found.`);
+
+    if (!tasks.length) {
+      this.taskListEl.createDiv({ cls: "chronoboard-modal-empty", text: "No tracked time was found in this date range." });
+      this.updateExportState();
+      return;
+    }
+
+    tasks.forEach((item) => {
+      const row = this.taskListEl.createDiv({ cls: "chronoboard-export-task-row" });
+      const checkbox = row.createEl("input", { cls: "chronoboard-export-task-checkbox" });
+      checkbox.type = "checkbox";
+      checkbox.checked = true;
+      checkbox.setAttr("aria-label", `Include ${this.plugin.getTaskLabel(item.task)}`);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          this.selectedTaskPaths.add(item.task.path);
+        } else {
+          this.selectedTaskPaths.delete(item.task.path);
+        }
+        this.updateExportState();
+      });
+      const label = row.createDiv({ cls: "chronoboard-export-task-label" });
+      label.createDiv({ cls: "chronoboard-task-key", text: item.task.jiraKey || item.task.file.basename });
+      const secondaryText = this.plugin.getTaskSecondaryText(item.task);
+      if (secondaryText) {
+        label.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
+      }
+      row.createDiv({ cls: "chronoboard-export-task-total", text: formatHours(item.minutes) });
+    });
+    this.updateExportState();
+  }
+
+  updateExportState() {
+    if (!this.exportButton || !this.pathStatusEl) {
+      return;
+    }
+    const path = this.getOutputPath();
+    let message = path || "Enter a valid export folder and file name.";
+    let isError = !path;
+    if (path && this.app.vault.getAbstractFileByPath(path)) {
+      message = `A file already exists at ${path}`;
+      isError = true;
+    }
+    this.pathStatusEl.setText(message);
+    this.pathStatusEl.classList.toggle("is-error", isError);
+    this.exportButton.disabled = isError || !this.hasValidRange() || !this.selectedTaskPaths.size;
+  }
+
+  async exportCsv() {
+    const path = this.getOutputPath();
+    if (!this.hasValidRange()) {
+      new Notice("The start date must not be after the end date.");
+      return;
+    }
+    if (!path) {
+      new Notice("Enter a valid export folder and file name.");
+      return;
+    }
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      new Notice(`A file already exists at ${path}`);
+      this.updateExportState();
+      return;
+    }
+    const selected = this.exportTasks.filter((item) => this.selectedTaskPaths.has(item.task.path));
+    if (!selected.length) {
+      new Notice("Select at least one task.");
+      return;
+    }
+
+    try {
+      const folder = normalizeVaultFolder(this.exportFolder);
+      await this.plugin.ensureVaultFolder(folder || "");
+      if (this.app.vault.getAbstractFileByPath(path)) {
+        new Notice(`A file already exists at ${path}`);
+        this.updateExportState();
+        return;
+      }
+      const csv = this.plugin.buildCsvExport(selected, {
+        compressed: this.compressedMode,
+        startDate: this.startDate,
+        endDate: this.endDate
+      });
+      await this.app.vault.create(path, csv);
+      this.plugin.settings.exportFolder = normalizeVaultFolder(this.exportFolder) || "";
+      this.plugin.settings.compressedCsvExport = this.compressedMode;
+      await this.plugin.saveSettings();
+      new Notice(`CSV export created at ${path}`);
+      this.close();
+    } catch (error) {
+      console.error(error);
+      new Notice("Chronoboard could not create the CSV export.");
+    }
   }
 
   onClose() {
@@ -1228,6 +1512,23 @@ class ChronoboardView extends ItemView {
     return Math.max(width, this.getVisibleHourCount() * 84);
   }
 
+  getExportRange() {
+    if (this.currentMode === "day") {
+      const day = this.focusDate.format("YYYY-MM-DD");
+      return { startDate: day, endDate: day };
+    }
+    if (this.currentMode === "month" || this.currentMode === "stats") {
+      return {
+        startDate: this.focusDate.clone().startOf("month").format("YYYY-MM-DD"),
+        endDate: this.focusDate.clone().endOf("month").format("YYYY-MM-DD")
+      };
+    }
+    return {
+      startDate: this.focusDate.clone().startOf("isoWeek").format("YYYY-MM-DD"),
+      endDate: this.focusDate.clone().endOf("isoWeek").format("YYYY-MM-DD")
+    };
+  }
+
   renderToolbar(selectedTasks) {
     const isMobile = this.isMobileLayout();
     const toolbar = this.contentEl.createDiv({ cls: `chronoboard-toolbar${isMobile ? " is-mobile" : ""}` });
@@ -1240,19 +1541,27 @@ class ChronoboardView extends ItemView {
 
     const right = toolbar.createDiv({ cls: "chronoboard-toolbar-group" });
 
+    const exportButton = right.createEl("button", { cls: "chronoboard-toolbar-export-button" });
+    setIcon(exportButton, "upload");
+    exportButton.setAttr("aria-label", "Export tracked time as CSV");
+    exportButton.setAttr("title", "Export tracked time as CSV");
+    exportButton.addEventListener("click", () => {
+      this.plugin.showCsvExportModal(this.getExportRange());
+    });
+
     const statsButton = right.createEl("button", {
-      cls: `chronoboard-stats-button${this.currentMode === "stats" ? " is-active" : ""}`,
+      cls: `chronoboard-toolbar-state-button${this.currentMode === "stats" ? " is-active" : ""}`,
       text: "Stats"
     });
     statsButton.addEventListener("click", async () => {
-      this.currentMode = "stats";
+      this.currentMode = this.currentMode === "stats" ? "week" : "stats";
       await this.render();
     });
 
     if (!isMobile) {
       const taskToggle = right.createEl("button", {
-        cls: "chronoboard-collapse-button",
-        text: this.leftPanelCollapsed ? "Task" : "Hide Task"
+        cls: `chronoboard-toolbar-state-button${this.leftPanelCollapsed ? "" : " is-active"}`,
+        text: "Task"
       });
       taskToggle.addEventListener("click", async () => {
         this.leftPanelCollapsed = !this.leftPanelCollapsed;
@@ -1260,8 +1569,8 @@ class ChronoboardView extends ItemView {
       });
 
       const totalsToggle = right.createEl("button", {
-        cls: "chronoboard-collapse-button",
-        text: this.rightPanelCollapsed ? "Totals" : "Hide Totals"
+        cls: `chronoboard-toolbar-state-button${this.rightPanelCollapsed ? "" : " is-active"}`,
+        text: "Totals"
       });
       totalsToggle.addEventListener("click", async () => {
         this.rightPanelCollapsed = !this.rightPanelCollapsed;
@@ -1343,12 +1652,12 @@ class ChronoboardView extends ItemView {
     helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
     helpTrigger.setAttr("title", "Open Chronoboard guide");
     helpTrigger.addEventListener("click", async () => {
-      await this.plugin.openGuideNote();
+      this.plugin.openGuide();
     });
     helpTrigger.addEventListener("keydown", async (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        await this.plugin.openGuideNote();
+        this.plugin.openGuide();
       }
     });
 
@@ -1451,12 +1760,12 @@ class ChronoboardView extends ItemView {
     helpTrigger.setAttr("aria-label", "Open Chronoboard guide");
     helpTrigger.setAttr("title", "Open Chronoboard guide");
     helpTrigger.addEventListener("click", async () => {
-      await this.plugin.openGuideNote();
+      this.plugin.openGuide();
     });
     helpTrigger.addEventListener("keydown", async (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        await this.plugin.openGuideNote();
+        this.plugin.openGuide();
       }
     });
     const list = panel.createDiv({ cls: "chronoboard-mobile-task-list" });
@@ -2892,6 +3201,12 @@ module.exports = class ChronoboardPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "export-chronoboard-csv",
+      name: "Export tracked time as CSV",
+      callback: () => this.showCsvExportModal()
+    });
+
+    this.addCommand({
       id: "open-selected-chronoboard-task",
       name: "Open selected Chronoboard task",
       checkCallback: (checking) => {
@@ -2912,7 +3227,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.addCommand({
       id: "open-chronoboard-guide",
       name: "Open Chronoboard guide",
-      callback: async () => this.openGuideNote()
+      callback: () => this.openGuide()
     });
 
     this.addCommand({
@@ -2951,16 +3266,11 @@ module.exports = class ChronoboardPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async openGuideNote() {
-    const existing = this.app.vault.getAbstractFileByPath(GUIDE_NOTE_PATH);
-    let file = existing instanceof TFile ? existing : null;
-    if (!file) {
-      file = await this.app.vault.create(GUIDE_NOTE_PATH, this.buildGuideNoteContent());
-    }
-    await this.app.workspace.getLeaf("tab").openFile(file);
+  openGuide() {
+    new ChronoboardGuideModal(this.app, this).open();
   }
 
-  buildGuideNoteContent() {
+  buildGuideContent() {
     return [
       "> [!info] What Chronoboard Is",
       "> Chronoboard is a task-native timeboard for Obsidian. It lets you pull tasks from a configured folder and place time visually in day, week, and month views.",
@@ -3020,6 +3330,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "- `Open Chronoboard`",
       "- `Add task to Chronoboard`",
       "- `Open manual time entry`",
+      "- `Export tracked time as CSV`",
       "- `Open selected Chronoboard task`",
       "- `Open Chronoboard guide`",
       "- `Add TaskNotes fields to current task`",
@@ -3132,6 +3443,187 @@ module.exports = class ChronoboardPlugin extends Plugin {
         await this.refreshAllViews();
       }
     }).open();
+  }
+
+  showCsvExportModal(range = null) {
+    const view = this.getOpenChronoboardView();
+    const defaultRange = range || view?.getExportRange() || {
+      startDate: moment().startOf("isoWeek").format("YYYY-MM-DD"),
+      endDate: moment().endOf("isoWeek").format("YYYY-MM-DD")
+    };
+    new CsvExportModal(this.app, this, defaultRange).open();
+  }
+
+  async getExportTasksInRange(startDate, endDate) {
+    const rangeStart = moment(startDate, "YYYY-MM-DD", true).startOf("day");
+    const rangeEnd = moment(endDate, "YYYY-MM-DD", true).add(1, "day").startOf("day");
+    if (!rangeStart.isValid() || !rangeEnd.isValid() || !rangeStart.isBefore(rangeEnd)) {
+      return [];
+    }
+
+    const files = new Map();
+    const folder = normalizeVaultFolder(this.settings.folder);
+    if (folder !== null) {
+      const prefix = folder ? `${folder}/` : "";
+      this.app.vault.getMarkdownFiles().forEach((file) => {
+        if (!folder || file.path.startsWith(prefix)) {
+          files.set(file.path, file);
+        }
+      });
+    }
+    [
+      ...(this.settings.staticTaskPaths || []),
+      ...(this.settings.selectedTaskPaths || []),
+      ...(this.settings.boardOnlyTaskPaths || [])
+    ].forEach((path) => {
+      const file = this.resolveVaultMarkdownFile(path);
+      if (file instanceof TFile) {
+        files.set(file.path, file);
+      }
+    });
+
+    const results = [];
+    files.forEach((file) => {
+      const task = this.getTaskFromFile(file);
+      if (!task) {
+        return;
+      }
+      const entries = [];
+      (task.timeEntries || []).forEach((entry) => {
+        const start = parseFrontmatterDate(entry.startTime);
+        const end = parseFrontmatterDate(entry.endTime);
+        if (!start || !end || !end.isAfter(start) || !end.isAfter(rangeStart) || !start.isBefore(rangeEnd)) {
+          return;
+        }
+        const clippedStart = start.isBefore(rangeStart) ? rangeStart.clone() : start.clone();
+        const clippedEnd = end.isAfter(rangeEnd) ? rangeEnd.clone() : end.clone();
+        const minutes = Math.max(clippedEnd.diff(clippedStart, "minutes"), 0);
+        if (!minutes) {
+          return;
+        }
+        entries.push({ entry, clippedStart, clippedEnd, minutes });
+      });
+      if (!entries.length) {
+        return;
+      }
+      entries.sort((a, b) => a.clippedStart.valueOf() - b.clippedStart.valueOf());
+      results.push({
+        task,
+        entries,
+        minutes: entries.reduce((sum, item) => sum + item.minutes, 0)
+      });
+    });
+
+    return results.sort((a, b) => {
+      if (b.minutes !== a.minutes) {
+        return b.minutes - a.minutes;
+      }
+      return this.getTaskLabel(a.task).localeCompare(this.getTaskLabel(b.task));
+    });
+  }
+
+  buildCsvExport(taskGroups, options = {}) {
+    if (options.compressed) {
+      return this.buildCompressedCsvExport(taskGroups, options.startDate, options.endDate);
+    }
+    const rows = [[
+      "Task",
+      "Subtitle",
+      "Status",
+      "Date",
+      "Start",
+      "End",
+      "Duration Minutes",
+      "Hours",
+      "Block Text",
+      "Task Path",
+      "Time Entry Note"
+    ]];
+    const entries = [];
+    taskGroups.forEach((group) => {
+      group.entries.forEach((item) => entries.push({ task: group.task, ...item }));
+    });
+    entries.sort((a, b) => a.clippedStart.valueOf() - b.clippedStart.valueOf());
+    entries.forEach(({ task, entry, clippedStart, clippedEnd, minutes }) => {
+      rows.push([
+        task.jiraKey || task.file.basename,
+        this.getTaskSecondaryText(task),
+        task.status || "",
+        clippedStart.format("YYYY-MM-DD"),
+        clippedStart.format("HH:mm"),
+        clippedEnd.format("HH:mm"),
+        String(minutes),
+        (minutes / 60).toFixed(2),
+        entry.label || "",
+        task.path,
+        entry.notePath || ""
+      ]);
+    });
+    return `${rows.map((row) => row.map(escapeCsvValue).join(",")).join("\n")}\n`;
+  }
+
+  buildCompressedCsvExport(taskGroups, startDate, endDate) {
+    const sortedGroups = [...taskGroups].sort((a, b) => {
+      if (b.minutes !== a.minutes) {
+        return b.minutes - a.minutes;
+      }
+      return this.getTaskLabel(a.task).localeCompare(this.getTaskLabel(b.task));
+    });
+    const rows = [[
+      "Date",
+      ...sortedGroups.map((group) => this.getTaskLabel(group.task)),
+      "TOTAL"
+    ]];
+    const totalMinutes = sortedGroups.reduce((sum, group) => sum + group.minutes, 0);
+    rows.push([
+      "TOTAL",
+      ...sortedGroups.map((group) => (group.minutes / 60).toFixed(2)),
+      (totalMinutes / 60).toFixed(2)
+    ]);
+
+    const cursor = moment(startDate, "YYYY-MM-DD", true).startOf("day");
+    const finalDay = moment(endDate, "YYYY-MM-DD", true).startOf("day");
+    while (cursor.isSameOrBefore(finalDay, "day")) {
+      const dayStart = cursor.clone().startOf("day");
+      const dayEnd = dayStart.clone().add(1, "day");
+      const taskMinutes = sortedGroups.map((group) => group.entries.reduce((sum, item) => {
+        if (!item.clippedEnd.isAfter(dayStart) || !item.clippedStart.isBefore(dayEnd)) {
+          return sum;
+        }
+        const start = item.clippedStart.isBefore(dayStart) ? dayStart : item.clippedStart;
+        const end = item.clippedEnd.isAfter(dayEnd) ? dayEnd : item.clippedEnd;
+        return sum + Math.max(end.diff(start, "minutes"), 0);
+      }, 0));
+      rows.push([
+        dayStart.format("YYYY-MM-DD"),
+        ...taskMinutes.map((minutes) => (minutes / 60).toFixed(2)),
+        (taskMinutes.reduce((sum, minutes) => sum + minutes, 0) / 60).toFixed(2)
+      ]);
+      cursor.add(1, "day");
+    }
+    return `${rows.map((row) => row.map(escapeCsvValue).join(",")).join("\n")}\n`;
+  }
+
+  async ensureVaultFolder(folderPath) {
+    const folder = normalizeVaultFolder(folderPath);
+    if (folder === null) {
+      throw new Error("Invalid export folder path");
+    }
+    if (!folder) {
+      return;
+    }
+    let currentPath = "";
+    for (const segment of folder.split("/")) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
+      const existing = this.app.vault.getAbstractFileByPath(currentPath);
+      if (existing instanceof TFolder) {
+        continue;
+      }
+      if (existing) {
+        throw new Error(`A file blocks the export folder path: ${currentPath}`);
+      }
+      await this.app.vault.createFolder(currentPath);
+    }
   }
 
   async getAvailableTasks() {

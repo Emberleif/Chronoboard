@@ -11,6 +11,7 @@ It turns Markdown tasks into draggable time blocks across day, week, and month v
 - Stores time entries directly in task frontmatter
 - Supports dedicated time entry notes for individual blocks
 - Tracks scoped totals for day, week, and month
+- Exports selected tasks and date ranges to CSV
 - Keeps the data portable because the source of truth remains Markdown
 
 ## Core Workflow
@@ -65,19 +66,23 @@ Chronoboard adds the following commands to the Obsidian command palette:
 - `Open Chronoboard`
 - `Add task to Chronoboard`
 - `Open manual time entry`
+- `Export tracked time as CSV`
 - `Open selected Chronoboard task`
 - `Open Chronoboard guide`
-- `Open Chronoboard changelog`
 - `Add TaskNotes fields to current task`
 
-## Managed Vault Notes
+## Help
 
-Chronoboard can create and maintain helper notes inside your vault:
+Select the question mark in the Task panel or run `Open Chronoboard guide` to open the help modal. Chronoboard does not create help or changelog notes in your vault.
 
-- `Getting Started With Chronoboard`
-- `Chronoboard - Changelog`
+## CSV Export
 
-On first install, the guide note opens automatically. On plugin updates, the changelog note opens automatically.
+Select the upload icon or run `Export tracked time as CSV`. The export modal uses the date range from the current view and lists tasks from most tracked time to least tracked time.
+
+- Uncompressed mode creates one row for each time block.
+- Compressed mode puts tasks in columns and dates in rows. The second row contains totals for the full date range.
+- Chronoboard remembers the export folder and mode after a successful export.
+- Chronoboard does not overwrite an existing CSV file.
 
 ## Frontmatter
 
@@ -141,7 +146,6 @@ GitHub releases should include:
 - `manifest.json`
 - `main.js`
 - `styles.css`
-- `versions.json`
 
 ## Changelog
 
