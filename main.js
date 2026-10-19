@@ -3248,7 +3248,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.addSettingTab(new ChronoboardSettingTab(this.app, this));
 
     this.registerEvent(this.app.metadataCache.on("changed", () => this.refreshAllViews()));
-    this.registerEvent(this.app.vault.on("rename", () => this.refreshAllViews()));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => this.handleRename(file, oldPath)));
     this.registerEvent(this.app.vault.on("delete", () => this.refreshAllViews()));
     this.registerDomEvent(document, "keydown", (event) => this.handleUndoKeydown(event));
   }
@@ -3264,6 +3264,24 @@ module.exports = class ChronoboardPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async handleRename(file, oldPath) {
+    if (file instanceof TFile) {
+      const remap = (path) => (path === oldPath ? file.path : path);
+      let changed = false;
+      for (const key of ["selectedTaskPaths", "staticTaskPaths", "boardOnlyTaskPaths"]) {
+        const paths = this.settings[key] || [];
+        if (paths.includes(oldPath)) {
+          this.settings[key] = paths.map(remap);
+          changed = true;
+        }
+      }
+      if (changed) {
+        await this.saveSettings();
+      }
+    }
+    this.refreshAllViews();
   }
 
   openGuide() {
@@ -3658,7 +3676,15 @@ module.exports = class ChronoboardPlugin extends Plugin {
   async getTaskMap(paths) {
     const map = new Map();
     for (const path of paths) {
-      const file = this.app.vault.getAbstractFileByPath(path);
+      let file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) {
+        const basename = path.split("/").pop();
+        const matches = this.app.vault.getMarkdownFiles().filter((candidate) => candidate.name === basename);
+        if (matches.length === 1) {
+          file = matches[0];
+          await this.handleRename(file, path);
+        }
+      }
       if (!(file instanceof TFile)) {
         continue;
       }
