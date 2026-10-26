@@ -1,6 +1,6 @@
 # Chronoboard Changelog
 
-## Unreleased
+## 0.8.1
 
 ### Added
 
