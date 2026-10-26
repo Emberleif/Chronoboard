@@ -3175,6 +3175,11 @@ module.exports = class ChronoboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.undoStack = [];
+    this.settingsSaveQueue = Promise.resolve();
+    this.frontmatterSaveQueues = new Map();
+    this.saveConfirmationTimer = null;
+    this.savedIndicatorTimer = null;
+    this.savedIndicatorEl = null;
 
     this.registerView(VIEW_TYPE, (leaf) => new ChronoboardView(leaf, this));
 
@@ -3254,6 +3259,10 @@ module.exports = class ChronoboardPlugin extends Plugin {
   }
 
   async onunload() {
+    window.clearTimeout(this.saveConfirmationTimer);
+    window.clearTimeout(this.savedIndicatorTimer);
+    this.savedIndicatorEl?.remove();
+    await Promise.allSettled([this.settingsSaveQueue, ...this.frontmatterSaveQueues.values()]);
     await this.app.workspace.detachLeavesOfType(VIEW_TYPE);
   }
 
@@ -3262,26 +3271,114 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.settings.highlightColor = normalizeHexColor(this.settings.highlightColor);
   }
 
-  async saveSettings() {
-    await this.saveData(this.settings);
+  async saveSettings(options = {}) {
+    await this.queueSettingsSave();
+    if (options.confirm !== false) {
+      this.scheduleSaveConfirmation();
+    }
+  }
+
+  queueSettingsSave() {
+    const snapshot = JSON.parse(JSON.stringify(this.settings));
+    this.settingsSaveQueue = this.settingsSaveQueue
+      .catch((error) => console.error("A previous Chronoboard settings save failed.", error))
+      .then(() => this.saveData(snapshot));
+    return this.settingsSaveQueue;
+  }
+
+  async processTaskFrontMatter(file, update) {
+    const key = file.path;
+    const previous = this.frontmatterSaveQueues.get(key) || Promise.resolve();
+    const pending = previous
+      .catch((error) => console.error(`A previous Chronoboard save failed for ${key}.`, error))
+      .then(() => this.app.fileManager.processFrontMatter(file, update));
+    this.frontmatterSaveQueues.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.frontmatterSaveQueues.get(key) === pending) {
+        this.frontmatterSaveQueues.delete(key);
+      }
+    }
+  }
+
+  scheduleSaveConfirmation() {
+    window.clearTimeout(this.saveConfirmationTimer);
+    this.saveConfirmationTimer = window.setTimeout(async () => {
+      try {
+        await this.queueSettingsSave();
+        this.showSavedIndicator();
+      } catch (error) {
+        console.error("Chronoboard could not save its settings.", error);
+        new Notice("Chronoboard could not save changes.");
+      }
+    }, 3000);
+  }
+
+  showSavedIndicator() {
+    window.clearTimeout(this.savedIndicatorTimer);
+    this.savedIndicatorEl?.remove();
+    const indicator = document.body.createDiv({ cls: "chronoboard-saved-indicator" });
+    const icon = indicator.createSpan({ cls: "chronoboard-saved-indicator-icon" });
+    setIcon(icon, "check");
+    indicator.createSpan({ text: "Saved" });
+    this.savedIndicatorEl = indicator;
+    this.savedIndicatorTimer = window.setTimeout(() => {
+      indicator.remove();
+      if (this.savedIndicatorEl === indicator) {
+        this.savedIndicatorEl = null;
+      }
+    }, 2200);
+  }
+
+  async remapStoredTaskPaths(remap) {
+    let changed = false;
+    for (const key of ["selectedTaskPaths", "staticTaskPaths", "boardOnlyTaskPaths"]) {
+      const current = Array.isArray(this.settings[key]) ? this.settings[key] : [];
+      const updated = [...new Set(current.map(remap).filter(Boolean))];
+      if (updated.length !== current.length || updated.some((path, index) => path !== current[index])) {
+        this.settings[key] = updated;
+        changed = true;
+      }
+    }
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view?.selectedTaskPath) {
+        view.selectedTaskPath = remap(view.selectedTaskPath);
+      }
+    }
+    if (changed) {
+      await this.saveSettings({ confirm: false });
+    }
+    return changed;
   }
 
   async handleRename(file, oldPath) {
-    if (file instanceof TFile) {
-      const remap = (path) => (path === oldPath ? file.path : path);
-      let changed = false;
-      for (const key of ["selectedTaskPaths", "staticTaskPaths", "boardOnlyTaskPaths"]) {
-        const paths = this.settings[key] || [];
-        if (paths.includes(oldPath)) {
-          this.settings[key] = paths.map(remap);
-          changed = true;
-        }
-      }
-      if (changed) {
-        await this.saveSettings();
-      }
+    if (!(file instanceof TFile) && !(file instanceof TFolder)) {
+      await this.refreshAllViews();
+      return;
     }
-    this.refreshAllViews();
+    const oldPrefix = `${oldPath}/`;
+    const newPrefix = `${file.path}/`;
+    const remap = file instanceof TFile
+      ? (path) => (path === oldPath ? file.path : path)
+      : (path) => (path.startsWith(oldPrefix) ? `${newPrefix}${path.slice(oldPrefix.length)}` : path);
+    await this.remapStoredTaskPaths(remap);
+    await this.refreshAllViews();
+  }
+
+  async repairMissingTaskPath(path) {
+    const fileName = String(path || "").split("/").pop();
+    if (!fileName) {
+      return null;
+    }
+    const matches = this.app.vault.getMarkdownFiles().filter((candidate) => candidate.name === fileName);
+    if (matches.length !== 1) {
+      return null;
+    }
+    const file = matches[0];
+    await this.remapStoredTaskPaths((storedPath) => (storedPath === path ? file.path : storedPath));
+    return file;
   }
 
   openGuide() {
@@ -3678,12 +3775,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
     for (const path of paths) {
       let file = this.app.vault.getAbstractFileByPath(path);
       if (!(file instanceof TFile)) {
-        const basename = path.split("/").pop();
-        const matches = this.app.vault.getMarkdownFiles().filter((candidate) => candidate.name === basename);
-        if (matches.length === 1) {
-          file = matches[0];
-          await this.handleRename(file, path);
-        }
+        file = await this.repairMissingTaskPath(path);
       }
       if (!(file instanceof TFile)) {
         continue;
@@ -3691,6 +3783,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
       const task = this.getTaskFromFile(file);
       if (task) {
         map.set(path, task);
+        map.set(file.path, task);
       }
     }
     return map;
@@ -3859,7 +3952,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
 
   async ensureTaskNoteShape(file) {
     try {
-      await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      await this.processTaskFrontMatter(file, (frontmatter) => {
         const tags = new Set(this.extractTags(frontmatter));
         tags.add(this.settings.taskTag);
         tags.add(this.settings.jiraTag);
@@ -3891,7 +3984,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
   async addTimeEntry(file, entry, options = {}) {
     let storedEntry = null;
     let storedIndex = -1;
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
       storedEntry = {
         ...entry,
@@ -3910,13 +4003,14 @@ module.exports = class ChronoboardPlugin extends Plugin {
         entryIndex: storedIndex
       });
     }
+    this.scheduleSaveConfirmation();
     await this.refreshAllViews();
     return { entry: storedEntry, entryIndex: storedIndex };
   }
 
   async removeTimeEntry(file, entry, entryIndex, options = {}) {
     let removedEntry = null;
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
       frontmatter.timeEntries = existing.filter((candidate, index) => {
         const matchesById = entry.id && candidate.id === entry.id;
@@ -3935,12 +4029,13 @@ module.exports = class ChronoboardPlugin extends Plugin {
         entry: removedEntry
       });
     }
+    this.scheduleSaveConfirmation();
     await this.refreshAllViews();
     return removedEntry;
   }
 
   async updateTimeEntry(file, entryIndex, updatedEntry) {
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
       if (entryIndex >= 0 && entryIndex < existing.length) {
         existing[entryIndex] = updatedEntry;
@@ -3948,28 +4043,31 @@ module.exports = class ChronoboardPlugin extends Plugin {
       existing.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
       frontmatter.timeEntries = existing;
     });
+    this.scheduleSaveConfirmation();
     await this.refreshAllViews();
   }
 
   async updateTicketColor(file, color) {
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.processTaskFrontMatter(file, (frontmatter) => {
       if (color) {
         frontmatter[this.settings.colorProperty] = color;
       } else {
         delete frontmatter[this.settings.colorProperty];
       }
     });
+    this.scheduleSaveConfirmation();
     await this.refreshAllViews();
   }
 
   async updateTicketSubtitle(file, subtitle) {
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.processTaskFrontMatter(file, (frontmatter) => {
       if (subtitle) {
         frontmatter[this.settings.subtitleProperty] = subtitle;
       } else {
         delete frontmatter[this.settings.subtitleProperty];
       }
     });
+    this.scheduleSaveConfirmation();
     await this.refreshAllViews();
   }
 };

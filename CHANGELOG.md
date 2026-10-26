@@ -1,5 +1,19 @@
 # Chronoboard Changelog
 
+## Unreleased
+
+### Added
+
+- Added a green save confirmation three seconds after the last Chronoboard edit.
+
+### Fixed
+
+- Chronoboard now updates stored task paths when a task note or its folder moves.
+- Chronoboard can recover a uniquely named task note that moved while Obsidian was closed.
+- Path recovery no longer starts a second render while the board is rendering.
+- Task path repair now removes duplicate stored paths and keeps the selected task active.
+- Chronoboard now saves settings and task frontmatter edits in order when changes happen quickly.
+
 ## 0.8.0
 
 ### Added

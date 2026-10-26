@@ -12,6 +12,8 @@ It turns Markdown tasks into draggable time blocks across day, week, and month v
 - Supports dedicated time entry notes for individual blocks
 - Tracks scoped totals for day, week, and month
 - Exports selected tasks and date ranges to CSV
+- Keeps task references valid when task notes or their folders move
+- Shows a green confirmation after Chronoboard saves the final edit in a group
 - Keeps the data portable because the source of truth remains Markdown
 
 ## Core Workflow
@@ -39,6 +41,8 @@ It turns Markdown tasks into draggable time blocks across day, week, and month v
 - Drag the handles to resize a time block
 - Double click a time block to remove it
 - Use `Ctrl+Z` or `Cmd+Z` to undo time block add or remove actions
+
+Chronoboard writes task changes to frontmatter immediately. If you make multiple changes quickly, Chronoboard saves them in order and shows `Saved` after three seconds without another edit.
 
 ### Right click on a time block
 

@@ -650,6 +650,48 @@
   width: 100%;
 }
 
+.chronoboard-saved-indicator {
+  position: fixed;
+  top: 46px;
+  left: 50%;
+  z-index: 10000;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 6px 12px;
+  border: 1px solid #185c2d;
+  border-radius: 7px;
+  background: #217a3d;
+  color: white;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  animation: chronoboard-saved-drop 2.2s ease forwards;
+}
+
+.chronoboard-saved-indicator-icon,
+.chronoboard-saved-indicator-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+@keyframes chronoboard-saved-drop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -12px);
+  }
+  14%, 78% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+
 .chronoboard-export-modal {
   width: min(720px, calc(100vw - 32px));
   max-width: 720px;
