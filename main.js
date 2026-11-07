@@ -318,7 +318,18 @@ class TaskPickerModal extends FuzzySuggestModal {
   async getItemsAsync() {
     if (!this.candidates) {
       const all = await this.plugin.getAvailableTasks();
-      this.candidates = all.filter((task) => !this.excludePaths.has(task.path));
+      this.candidates = all
+        .filter((task) => !this.excludePaths.has(task.path))
+        .sort((a, b) => this.getItemText(a).localeCompare(this.getItemText(b)));
+      this.groupStartPaths = new Set();
+      let lastLetter = null;
+      this.candidates.forEach((task) => {
+        const letter = (task.jiraKey || task.file.basename).charAt(0).toUpperCase();
+        if (letter !== lastLetter) {
+          this.groupStartPaths.add(task.path);
+          lastLetter = letter;
+        }
+      });
     }
     return this.candidates;
   }
@@ -347,6 +358,13 @@ class TaskPickerModal extends FuzzySuggestModal {
 
   renderSuggestion(match, el) {
     const task = match.item;
+    if (!this.inputEl.value.trim() && this.groupStartPaths?.has(task.path)) {
+      el.parentElement.createDiv({
+        cls: "chronoboard-modal-group-header",
+        text: (task.jiraKey || task.file.basename).charAt(0).toUpperCase()
+      });
+      el.parentElement.appendChild(el);
+    }
     el.addClass("chronoboard-modal-card");
     el.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
     const secondaryText = this.plugin.getTaskSecondaryText(task);
