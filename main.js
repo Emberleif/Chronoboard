@@ -1,4 +1,5 @@
 const {
+  FuzzySuggestModal,
   ItemView,
   MarkdownRenderer,
   Menu,
@@ -304,51 +305,62 @@ class ChronoboardGuideModal extends Modal {
   }
 }
 
-class TaskPickerModal extends Modal {
+class TaskPickerModal extends FuzzySuggestModal {
   constructor(app, plugin, options) {
     super(app);
     this.plugin = plugin;
     this.onChoose = options.onChoose;
     this.excludePaths = new Set(options.excludePaths || []);
+    this.setPlaceholder("Search tasks...");
+    this.candidates = null;
+  }
+
+  async getItemsAsync() {
+    if (!this.candidates) {
+      const all = await this.plugin.getAvailableTasks();
+      this.candidates = all.filter((task) => !this.excludePaths.has(task.path));
+    }
+    return this.candidates;
+  }
+
+  getItems() {
+    return this.candidates || [];
   }
 
   async onOpen() {
-    const { contentEl, titleEl } = this;
-    titleEl.setText("Add task");
-    contentEl.empty();
-
-    const candidates = await this.plugin.getAvailableTasks();
-    const filtered = candidates.filter((task) => !this.excludePaths.has(task.path));
-
-    if (!filtered.length) {
-      contentEl.createDiv({
+    await this.getItemsAsync();
+    super.onOpen();
+    if (!this.candidates.length) {
+      this.resultContainerEl.empty();
+      this.resultContainerEl.createDiv({
         cls: "chronoboard-modal-empty",
         text: "No eligible tasks are available in the configured folder."
       });
-      return;
     }
+  }
 
-    const listEl = contentEl.createDiv({ cls: "chronoboard-modal-list" });
-    filtered.forEach((task) => {
-      const card = listEl.createDiv({ cls: "chronoboard-modal-card" });
-      card.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
-      const secondaryText = this.plugin.getTaskSecondaryText(task);
-      if (secondaryText) {
-        card.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
-      }
-      card.createDiv({
-        cls: "chronoboard-task-meta",
-        text: `${task.status || "unknown"}`
-      });
-      card.addEventListener("click", () => {
-        this.onChoose(task);
-        this.close();
-      });
+  getItemText(task) {
+    const key = task.jiraKey || task.file.basename;
+    const secondary = this.plugin.getTaskSecondaryText(task) || "";
+    return `${key} ${secondary}`;
+  }
+
+  renderSuggestion(match, el) {
+    const task = match.item;
+    el.addClass("chronoboard-modal-card");
+    el.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
+    const secondaryText = this.plugin.getTaskSecondaryText(task);
+    if (secondaryText) {
+      el.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
+    }
+    el.createDiv({
+      cls: "chronoboard-task-meta",
+      text: `${task.status || "unknown"}`
     });
   }
 
-  onClose() {
-    this.contentEl.empty();
+  onChooseItem(task) {
+    this.onChoose(task);
   }
 }
 
