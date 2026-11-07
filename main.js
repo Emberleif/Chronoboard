@@ -311,13 +311,14 @@ class TaskPickerModal extends FuzzySuggestModal {
     this.plugin = plugin;
     this.onChoose = options.onChoose;
     this.excludePaths = new Set(options.excludePaths || []);
+    this.providedItems = options.items || null;
     this.setPlaceholder("Search tasks...");
     this.candidates = null;
   }
 
   async getItemsAsync() {
     if (!this.candidates) {
-      const all = await this.plugin.getAvailableTasks();
+      const all = this.providedItems || (await this.plugin.getAvailableTasks());
       this.candidates = all
         .filter((task) => !this.excludePaths.has(task.path))
         .sort((a, b) => this.getItemText(a).localeCompare(this.getItemText(b)));
@@ -2080,6 +2081,7 @@ class ChronoboardView extends ItemView {
       const column = grid.createDiv({ cls: "chronoboard-week-day-column" });
       column.style.height = `${this.getTimelineHeight()}px`;
       column.addEventListener("mousedown", (event) => this.handleWeekMouseDown(event, selectedTask, dayMoment, column));
+      column.addEventListener("contextmenu", (event) => this.handleWeekContextMenu(event, dayMoment, column));
       if (this.dragState && this.dragState.action !== "resize" && this.dragState.mode === "week" && this.dragState.dayKey === dayKey) {
         column.addClass("is-dragging");
         this.renderDraftBlock(column, this.dragState, false);
@@ -2907,6 +2909,44 @@ class ChronoboardView extends ItemView {
     };
     this.addDragListeners();
     this.render();
+  }
+
+  handleWeekContextMenu(event, dayMoment, column) {
+    event.preventDefault();
+    const rect = column.getBoundingClientRect();
+    const coord = clampNumber(event.clientY - rect.top, 0, rect.height);
+    new TaskPickerModal(this.app, this.plugin, {
+      onChoose: async (task) => {
+        if (!this.plugin.settings.selectedTaskPaths.includes(task.path)) {
+          this.plugin.settings.selectedTaskPaths = [...this.plugin.settings.selectedTaskPaths, task.path];
+          this.plugin.settings.boardOnlyTaskPaths = (this.plugin.settings.boardOnlyTaskPaths || []).filter((path) => path !== task.path);
+          await this.plugin.saveSettings();
+        }
+        this.selectedTaskPath = task.path;
+        const entry = this.entryFromCoord(coord, rect.height, dayMoment.format("YYYY-MM-DD"));
+        if (entry) {
+          await this.plugin.addTimeEntry(task.file, entry, { pushUndo: true });
+        }
+        await this.render();
+      }
+    }).open();
+  }
+
+  entryFromCoord(coord, totalPixels, dayKey) {
+    const dayMoment = moment(dayKey, "YYYY-MM-DD");
+    const totalMinutes = this.getVisibleHourCount() * 60;
+    const minutesIntoWindow = (coord / totalPixels) * totalMinutes;
+    const roundedStart = clampNumber(Math.floor(minutesIntoWindow / 15) * 15, 0, Math.max(totalMinutes - 30, 0));
+    const roundedEnd = Math.min(roundedStart + 30, totalMinutes);
+    if (roundedEnd <= roundedStart) {
+      return null;
+    }
+    const start = dayMoment.clone().startOf("day").add(this.plugin.settings.visibleStartHour * 60 + roundedStart, "minutes");
+    const end = dayMoment.clone().startOf("day").add(this.plugin.settings.visibleStartHour * 60 + roundedEnd, "minutes");
+    return {
+      startTime: start.format("YYYY-MM-DDTHH:mm"),
+      endTime: end.format("YYYY-MM-DDTHH:mm")
+    };
   }
 
   handleDayMouseDown(event, task, dayMoment, row) {
