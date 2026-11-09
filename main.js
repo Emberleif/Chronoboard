@@ -38,6 +38,17 @@ const SUMMARY_SORT_ICONS = {
   least: "arrow-up-narrow-wide"
 };
 
+const STATS_SCOPE_ORDER = ["day", "week", "month", "year", "all"];
+const STATS_SCOPE_TITLES = {
+  day: "Daily Statistics",
+  week: "Weekly Statistics",
+  month: "Monthly Statistics",
+  year: "Yearly Statistics",
+  all: "All-Time Statistics"
+};
+
+const STATS_TASK_COLORS = ["#4e9af1", "#2fb859", "#d29119", "#9f63f2", "#e05a47", "#2da7a0", "#d05f9a"];
+
 const DEFAULT_SETTINGS = {
   folder: "Chronoboard Tasks",
   timeEntryNotesFolder: "Chronoboard Time Entry Notes",
@@ -55,7 +66,11 @@ const DEFAULT_SETTINGS = {
   colorProperty: "timeboardColor",
   subtitleProperty: "timeboardSubtitle",
   highlightColor: "",
+  heatmapLowColor: "#dbeafe",
+  heatmapHighColor: "#2563eb",
+  heatmapIncludeZeroDays: false,
   forceDarkTextOnColored: false,
+  taskPickerSort: "status",
   exportFolder: "Chronoboard Exports",
   compressedCsvExport: false
 };
@@ -225,6 +240,23 @@ function getHighlightCssValue(value) {
   return normalizeHexColor(value) || "var(--interactive-accent)";
 }
 
+function mixHexColors(startColor, endColor, ratio) {
+  const start = normalizeHexColor(startColor).slice(1);
+  const end = normalizeHexColor(endColor).slice(1);
+  const amount = Math.max(0, Math.min(1, Number(ratio) || 0));
+  if (!start || !end) {
+    return normalizeHexColor(endColor) || normalizeHexColor(startColor) || "#2563eb";
+  }
+  const mixed = [0, 2, 4].map((offset) => {
+    const startChannel = parseInt(start.slice(offset, offset + 2), 16);
+    const endChannel = parseInt(end.slice(offset, offset + 2), 16);
+    return Math.round(startChannel + (endChannel - startChannel) * amount)
+      .toString(16)
+      .padStart(2, "0");
+  });
+  return `#${mixed.join("")}`;
+}
+
 function getStatusToneClass(value) {
   const normalized = normalizeStatus(value);
   if (normalized === "in progress" || normalized === "in-progress") {
@@ -312,25 +344,35 @@ class TaskPickerModal extends FuzzySuggestModal {
     this.onChoose = options.onChoose;
     this.excludePaths = new Set(options.excludePaths || []);
     this.providedItems = options.items || null;
-    this.setPlaceholder("Search tasks...");
+    this.setPlaceholder("Enter a task key or title...");
     this.candidates = null;
   }
 
   async getItemsAsync() {
     if (!this.candidates) {
       const all = this.providedItems || (await this.plugin.getAvailableTasks());
-      this.candidates = all
-        .filter((task) => !this.excludePaths.has(task.path))
-        .sort((a, b) => this.getItemText(a).localeCompare(this.getItemText(b)));
-      this.groupStartPaths = new Set();
-      let lastLetter = null;
-      this.candidates.forEach((task) => {
-        const letter = (task.jiraKey || task.file.basename).charAt(0).toUpperCase();
-        if (letter !== lastLetter) {
-          this.groupStartPaths.add(task.path);
-          lastLetter = letter;
+      const sortMode = this.plugin.settings.taskPickerSort === "alphabetical" ? "alphabetical" : "status";
+      const filtered = all.filter((task) => !this.excludePaths.has(task.path));
+      this.candidates = filtered.sort((a, b) => {
+        if (sortMode === "status") {
+          const rankDiff = getStatusSortRank(a.status) - getStatusSortRank(b.status);
+          if (rankDiff !== 0) {
+            return rankDiff;
+          }
         }
+        return this.getItemText(a).localeCompare(this.getItemText(b));
       });
+      this.groupStartPaths = new Set();
+      if (sortMode === "alphabetical") {
+        let lastLetter = null;
+        this.candidates.forEach((task) => {
+          const letter = (task.jiraKey || task.file.basename).charAt(0).toUpperCase();
+          if (letter !== lastLetter) {
+            this.groupStartPaths.add(task.path);
+            lastLetter = letter;
+          }
+        });
+      }
     }
     return this.candidates;
   }
@@ -342,6 +384,25 @@ class TaskPickerModal extends FuzzySuggestModal {
   async onOpen() {
     await this.getItemsAsync();
     super.onOpen();
+    this.containerEl.addClass("chronoboard-task-picker-modal");
+    this.inputEl.setAttr("aria-label", "Search tasks by key or title");
+    const inputContainer = this.inputEl.parentElement;
+    if (inputContainer && !inputContainer.querySelector(".chronoboard-task-picker-intro")) {
+      inputContainer.addClass("chronoboard-task-picker-search");
+      const intro = inputContainer.createDiv({ cls: "chronoboard-task-picker-intro" });
+      intro.createDiv({ cls: "chronoboard-task-picker-title", text: "Choose a task" });
+      intro.createDiv({
+        cls: "chronoboard-task-picker-description",
+        text: "Search by task key or title, then select a task."
+      });
+      this.modalEl.querySelector(".modal-close-button")?.remove();
+      const closeButton = intro.createEl("button", { cls: "chronoboard-task-picker-close" });
+      setIcon(closeButton, "x");
+      closeButton.setAttr("aria-label", "Close task picker");
+      closeButton.setAttr("title", "Close task picker");
+      closeButton.addEventListener("click", () => this.close());
+      inputContainer.insertBefore(intro, this.inputEl);
+    }
     if (!this.candidates.length) {
       this.resultContainerEl.empty();
       this.resultContainerEl.createDiv({
@@ -359,7 +420,7 @@ class TaskPickerModal extends FuzzySuggestModal {
 
   renderSuggestion(match, el) {
     const task = match.item;
-    if (!this.inputEl.value.trim() && this.groupStartPaths?.has(task.path)) {
+    if (this.plugin.settings.taskPickerSort === "alphabetical" && !this.inputEl.value.trim() && this.groupStartPaths?.has(task.path)) {
       el.parentElement.createDiv({
         cls: "chronoboard-modal-group-header",
         text: (task.jiraKey || task.file.basename).charAt(0).toUpperCase()
@@ -1175,6 +1236,20 @@ class ChronoboardSettingTab extends PluginSettingTab {
           })
       );
 
+    new Setting(setupSection)
+      .setName("Task picker order")
+      .setDesc("Choose the order used before you enter a search.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("status", "Status")
+          .addOption("alphabetical", "Alphabetical")
+          .setValue(this.plugin.settings.taskPickerSort === "alphabetical" ? "alphabetical" : "status")
+          .onChange(async (value) => {
+            this.plugin.settings.taskPickerSort = value === "alphabetical" ? "alphabetical" : "status";
+            await this.plugin.saveSettings();
+          })
+      );
+
     let visibleStartSlider;
     let visibleStartText;
     let visibleEndSlider;
@@ -1308,6 +1383,73 @@ class ChronoboardSettingTab extends PluginSettingTab {
         });
       });
 
+    const addHeatmapColorSetting = (name, description, settingKey) => {
+      new Setting(customizationSection)
+        .setName(name)
+        .setDesc(description)
+        .addText((text) => {
+          text
+            .setPlaceholder(DEFAULT_SETTINGS[settingKey])
+            .setValue(this.plugin.settings[settingKey])
+            .onChange(async (value) => {
+              const color = normalizeHexColor(value);
+              if (!color) {
+                return;
+              }
+              this.plugin.settings[settingKey] = color;
+              await this.plugin.saveSettings();
+              await this.plugin.refreshAllViews();
+            });
+          const control = text.inputEl.closest(".setting-item-control") || text.inputEl.parentElement;
+          const pickerWrap = control.createDiv({ cls: "chronoboard-setting-color-wrap" });
+          const picker = pickerWrap.createEl("input", { cls: "chronoboard-setting-color-picker" });
+          picker.type = "color";
+          picker.value = normalizeHexColor(this.plugin.settings[settingKey]) || DEFAULT_SETTINGS[settingKey];
+          picker.addEventListener("pointerdown", (event) => event.stopPropagation());
+          picker.addEventListener("click", (event) => event.stopPropagation());
+          picker.addEventListener("input", async () => {
+            this.plugin.settings[settingKey] = picker.value;
+            text.setValue(picker.value);
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          });
+        })
+        .addExtraButton((button) => {
+          button.setIcon("reset");
+          button.setTooltip("Reset color");
+          button.onClick(async () => {
+            this.plugin.settings[settingKey] = DEFAULT_SETTINGS[settingKey];
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+            this.display();
+          });
+        });
+    };
+
+    addHeatmapColorSetting(
+      "Heatmap low color",
+      "Color used for the lowest tracked daily total in a heatmap.",
+      "heatmapLowColor"
+    );
+    addHeatmapColorSetting(
+      "Heatmap high color",
+      "Color used for the highest tracked daily total in a heatmap.",
+      "heatmapHighColor"
+    );
+
+    new Setting(customizationSection)
+      .setName("Color zero-hour heatmap days")
+      .setDesc("Use the low heatmap color for days that have no tracked time.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(Boolean(this.plugin.settings.heatmapIncludeZeroDays))
+          .onChange(async (value) => {
+            this.plugin.settings.heatmapIncludeZeroDays = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
     new Setting(customizationSection)
       .setName("Force dark text on colored cards")
       .setDesc("Use dark text on colored task cards and time blocks even when the color is light.")
@@ -1330,6 +1472,8 @@ class ChronoboardView extends ItemView {
     this.plugin = plugin;
     this.focusDate = moment();
     this.currentMode = "week";
+    this.statsScope = "month";
+    this.statsTransitionDirection = null;
     this.selectedTaskPath = plugin.settings.selectedTaskPaths[0] || null;
     this.currentSummarySort = "status";
     this.leftPanelCollapsed = false;
@@ -1495,6 +1639,25 @@ class ChronoboardView extends ItemView {
     });
   }
 
+  getSummaryCopy() {
+    if (this.currentMode === "stats") {
+      return {
+        day: { title: "Daily Total", note: "Tracked this day" },
+        week: { title: "Weekly Total", note: "Tracked this week" },
+        month: { title: "Monthly Total", note: "Tracked this month" },
+        year: { title: "Yearly Total", note: "Tracked this year" },
+        all: { title: "All-Time Total", note: "Tracked all time" }
+      }[this.statsScope] || { title: "Monthly Total", note: "Tracked this month" };
+    }
+    if (this.currentMode === "day") {
+      return { title: "Daily Total", note: "Tracked this day" };
+    }
+    if (this.currentMode === "month") {
+      return { title: "Monthly Total", note: "Tracked this month" };
+    }
+    return { title: "Weekly Total", note: "Tracked this week" };
+  }
+
   async render() {
     this.contentEl.empty();
     this.contentEl.addClass("chronoboard-view");
@@ -1543,12 +1706,82 @@ class ChronoboardView extends ItemView {
     return Math.max(width, this.getVisibleHourCount() * 84);
   }
 
+  getStatsPeriod() {
+    if (this.statsScope === "day") {
+      return {
+        start: this.focusDate.clone().startOf("day"),
+        end: this.focusDate.clone().endOf("day"),
+        label: this.focusDate.format("MMM Do, YYYY")
+      };
+    }
+    if (this.statsScope === "week") {
+      const start = this.focusDate.clone().startOf("isoWeek").startOf("day");
+      return {
+        start,
+        end: start.clone().add(6, "days").endOf("day"),
+        label: `Week ${Math.ceil(this.focusDate.date() / 7)} • ${this.focusDate.format("MMM YYYY")}`
+      };
+    }
+    if (this.statsScope === "year") {
+      return {
+        start: this.focusDate.clone().startOf("year"),
+        end: this.focusDate.clone().endOf("year"),
+        label: this.focusDate.format("YYYY")
+      };
+    }
+    if (this.statsScope === "all") {
+      return { start: null, end: null, label: "All Time" };
+    }
+    return {
+      start: this.focusDate.clone().startOf("month"),
+      end: this.focusDate.clone().endOf("month"),
+      label: this.focusDate.format("MMMM YYYY")
+    };
+  }
+
+  getStatsNavigationUnit() {
+    if (this.statsScope === "day") {
+      return "day";
+    }
+    if (this.statsScope === "week") {
+      return "week";
+    }
+    if (this.statsScope === "year") {
+      return "year";
+    }
+    if (this.statsScope === "all") {
+      return null;
+    }
+    return "month";
+  }
+
+  getStatsMinutes(entries) {
+    const period = this.getStatsPeriod();
+    return (entries || []).reduce((sum, entry) => {
+      const start = parseFrontmatterDate(entry.startTime);
+      if (!start) {
+        return sum;
+      }
+      if (period.start && (start.isBefore(period.start) || start.isAfter(period.end))) {
+        return sum;
+      }
+      return sum + this.entryMinutes(entry);
+    }, 0);
+  }
+
   getExportRange() {
     if (this.currentMode === "day") {
       const day = this.focusDate.format("YYYY-MM-DD");
       return { startDate: day, endDate: day };
     }
-    if (this.currentMode === "month" || this.currentMode === "stats") {
+    if (this.currentMode === "stats") {
+      const period = this.getStatsPeriod();
+      return {
+        startDate: period.start ? period.start.format("YYYY-MM-DD") : "1900-01-01",
+        endDate: period.end ? period.end.format("YYYY-MM-DD") : "2999-12-31"
+      };
+    }
+    if (this.currentMode === "month") {
       return {
         startDate: this.focusDate.clone().startOf("month").format("YYYY-MM-DD"),
         endDate: this.focusDate.clone().endOf("month").format("YYYY-MM-DD")
@@ -1610,16 +1843,38 @@ class ChronoboardView extends ItemView {
     }
 
     const prevButton = right.createEl("button", { cls: "chronoboard-nav-button", text: "<" });
+    prevButton.disabled = this.currentMode === "stats" && this.statsScope === "all";
     prevButton.addEventListener("click", async () => {
-      this.focusDate = this.focusDate.clone().subtract(1, this.currentMode === "day" ? "day" : this.currentMode === "month" || this.currentMode === "stats" ? "month" : "week");
+      const unit = this.currentMode === "stats"
+        ? this.getStatsNavigationUnit()
+        : this.currentMode === "day"
+          ? "day"
+          : this.currentMode === "month"
+            ? "month"
+            : "week";
+      if (!unit) {
+        return;
+      }
+      this.focusDate = this.focusDate.clone().subtract(1, unit);
       await this.render();
     });
 
     right.createDiv({ cls: "chronoboard-pill", text: this.getDateLabel() });
 
     const nextButton = right.createEl("button", { cls: "chronoboard-nav-button", text: ">" });
+    nextButton.disabled = this.currentMode === "stats" && this.statsScope === "all";
     nextButton.addEventListener("click", async () => {
-      this.focusDate = this.focusDate.clone().add(1, this.currentMode === "day" ? "day" : this.currentMode === "month" || this.currentMode === "stats" ? "month" : "week");
+      const unit = this.currentMode === "stats"
+        ? this.getStatsNavigationUnit()
+        : this.currentMode === "day"
+          ? "day"
+          : this.currentMode === "month"
+            ? "month"
+            : "week";
+      if (!unit) {
+        return;
+      }
+      this.focusDate = this.focusDate.clone().add(1, unit);
       await this.render();
     });
 
@@ -1667,9 +1922,48 @@ class ChronoboardView extends ItemView {
       return `${start.format("MMM D")} to ${start.clone().add(6, "days").format("MMM D")}`;
     }
     if (this.currentMode === "stats") {
-      return this.focusDate.format("MMMM YYYY");
+      return this.getStatsPeriod().label;
     }
     return this.focusDate.format("MMMM YYYY");
+  }
+
+  renderStatsScopeHeader(container) {
+    container.addClass("chronoboard-stats-scope-head");
+    const scopeIndex = STATS_SCOPE_ORDER.indexOf(this.statsScope);
+    const previous = container.createEl("button", {
+      cls: "chronoboard-stats-scope-button",
+      text: "<"
+    });
+    previous.disabled = scopeIndex <= 0;
+    previous.setAttr("aria-label", "Show a smaller statistics range");
+    previous.addEventListener("click", async () => {
+      if (scopeIndex <= 0) {
+        return;
+      }
+      this.statsScope = STATS_SCOPE_ORDER[scopeIndex - 1];
+      this.statsTransitionDirection = "backward";
+      await this.render();
+    });
+
+    container.createDiv({
+      cls: "chronoboard-center-title chronoboard-stats-scope-title",
+      text: STATS_SCOPE_TITLES[this.statsScope] || STATS_SCOPE_TITLES.month
+    });
+
+    const next = container.createEl("button", {
+      cls: "chronoboard-stats-scope-button",
+      text: ">"
+    });
+    next.disabled = scopeIndex >= STATS_SCOPE_ORDER.length - 1;
+    next.setAttr("aria-label", "Show a larger statistics range");
+    next.addEventListener("click", async () => {
+      if (scopeIndex >= STATS_SCOPE_ORDER.length - 1) {
+        return;
+      }
+      this.statsScope = STATS_SCOPE_ORDER[scopeIndex + 1];
+      this.statsTransitionDirection = "forward";
+      await this.render();
+    });
   }
 
   renderTaskRail(layout, selectedTasks, selectedPaths) {
@@ -1760,16 +2054,18 @@ class ChronoboardView extends ItemView {
 
     const timelinePanel = layout.createDiv({ cls: "chronoboard-panel chronoboard-mobile-panel" });
     const timelineHead = timelinePanel.createDiv({ cls: "chronoboard-panel-head chronoboard-mobile-timeline-head" });
-    timelineHead.createDiv({
-      text:
-        this.currentMode === "day"
-          ? `Daily Time • ${this.focusDate.format("dddd")}`
-          : this.currentMode === "week"
-            ? "Weekly Time"
-            : this.currentMode === "month"
-              ? "Monthly Time"
-              : "Statistics"
-    });
+    if (this.currentMode === "stats") {
+      this.renderStatsScopeHeader(timelineHead);
+    } else {
+      timelineHead.createDiv({
+        text:
+          this.currentMode === "day"
+            ? `Daily Time • ${this.focusDate.format("dddd")}`
+            : this.currentMode === "week"
+              ? "Weekly Time"
+              : "Monthly Time"
+      });
+    }
 
     if (this.currentMode === "stats") {
       this.renderStatistics(timelinePanel, visibleTasks);
@@ -1938,10 +2234,11 @@ class ChronoboardView extends ItemView {
 
   renderMobileSummary(layout, visibleTasks) {
     const scopedTasks = this.getSummarySortedTasks(visibleTasks);
+    const summaryCopy = this.getSummaryCopy();
     const panel = layout.createDiv({ cls: "chronoboard-panel chronoboard-mobile-panel" });
     const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
     panelHead.createDiv({
-      text: this.currentMode === "day" ? "Daily Total" : this.currentMode === "month" ? "Monthly Total" : "Weekly Total"
+      text: summaryCopy.title
     });
     const headMeta = panelHead.createDiv({ cls: "chronoboard-summary-head-meta" });
     headMeta.createDiv({
@@ -1984,7 +2281,7 @@ class ChronoboardView extends ItemView {
       card.createDiv({ cls: "chronoboard-summary-hours", text: formatHours(this.getSummaryMinutesForTask(task)) });
       card.createDiv({
         cls: "chronoboard-summary-note",
-        text: this.currentMode === "day" ? "Tracked this day" : this.currentMode === "month" ? "Tracked this month" : "Tracked this week"
+        text: summaryCopy.note
       });
       card.addEventListener("click", async () => {
         this.selectedTaskPath = task.path;
@@ -2015,7 +2312,9 @@ class ChronoboardView extends ItemView {
   renderCenter(layout, selectedTasks) {
     const panel = layout.createDiv({ cls: "chronoboard-panel chronoboard-center" });
     const head = panel.createDiv({ cls: "chronoboard-panel-head chronoboard-center-head" });
-    if (this.currentMode === "day") {
+    if (this.currentMode === "stats") {
+      this.renderStatsScopeHeader(head);
+    } else if (this.currentMode === "day") {
       head.createDiv({ cls: "chronoboard-center-title chronoboard-center-title-left", text: "Daily Time" });
       head.createDiv({ cls: "chronoboard-center-day-label", text: this.focusDate.format("dddd") });
       head.createDiv({ cls: "chronoboard-center-spacer" });
@@ -2027,7 +2326,7 @@ class ChronoboardView extends ItemView {
             ? "Weekly Time"
             : this.currentMode === "month"
               ? "Monthly Time"
-              : "Statistics"
+              : "Monthly Time"
       });
     }
 
@@ -2277,58 +2576,309 @@ class ChronoboardView extends ItemView {
   }
 
   renderStatistics(panel, selectedTasks) {
-    const wrap = panel.createDiv({ cls: "chronoboard-stats-layout" });
-    const todayKey = moment().format("YYYY-MM-DD");
-    const monthStart = this.focusDate.clone().startOf("month");
-    const monthEnd = monthStart.clone().endOf("month");
-    const totalWeek = selectedTasks.reduce((sum, task) => sum + this.getMinutesForWeek(task.timeEntries || []), 0);
-    const totalMonth = selectedTasks.reduce((sum, task) => sum + this.getMinutesForMonth(task.timeEntries || [], monthStart, monthEnd), 0);
-    const totalToday = selectedTasks.reduce((sum, task) => sum + this.getMinutesForDay(task.timeEntries || [], todayKey), 0);
+    const transitionClass = this.statsTransitionDirection
+      ? ` is-slide-${this.statsTransitionDirection}`
+      : "";
+    this.statsTransitionDirection = null;
+    const wrap = panel.createDiv({ cls: `chronoboard-stats-layout${transitionClass}` });
+    const period = this.getStatsPeriod();
+    const taskStats = selectedTasks
+      .map((task) => {
+        const entries = (task.timeEntries || []).filter((entry) => {
+          const start = parseFrontmatterDate(entry.startTime);
+          if (!start) {
+            return false;
+          }
+          return !period.start || (!start.isBefore(period.start) && !start.isAfter(period.end));
+        });
+        return {
+          task,
+          entries,
+          minutes: entries.reduce((sum, entry) => sum + this.entryMinutes(entry), 0),
+          blockCount: entries.length,
+          activeDays: new Set(entries.map((entry) => moment(entry.startTime).format("YYYY-MM-DD"))).size
+        };
+      })
+      .filter((item) => item.blockCount > 0)
+      .sort((a, b) => b.minutes - a.minutes || this.plugin.getTaskLabel(a.task).localeCompare(this.plugin.getTaskLabel(b.task)));
+    const totalMinutes = taskStats.reduce((sum, item) => sum + item.minutes, 0);
+    const totalBlocks = taskStats.reduce((sum, item) => sum + item.blockCount, 0);
+    const activeDates = new Set(
+      taskStats.flatMap((item) => item.entries.map((entry) => moment(entry.startTime).format("YYYY-MM-DD")))
+    );
+    const averageBlockMinutes = totalBlocks ? Math.round(totalMinutes / totalBlocks) : 0;
+
+    const periodHead = wrap.createDiv({ cls: "chronoboard-stats-period" });
+    periodHead.createDiv({ cls: "chronoboard-stats-period-title", text: period.label });
+    periodHead.createDiv({
+      cls: "chronoboard-stats-period-description",
+      text: "Activity from tasks shown on the Chronoboard."
+    });
+
+    const periodDescription = this.statsScope === "all"
+      ? "All recorded time"
+      : `Total for this ${this.statsScope}`;
 
     const cards = wrap.createDiv({ cls: "chronoboard-stats-cards" });
     [
-      { label: "Today", value: formatHours(totalToday) },
-      { label: "This Week", value: formatHours(totalWeek) },
-      { label: "This Month", value: formatHours(totalMonth) },
-      { label: "Selected Tasks", value: String(selectedTasks.length) }
+      { label: "Tracked time", value: formatHours(totalMinutes), detail: periodDescription },
+      { label: "Tracked tasks", value: String(taskStats.length), detail: `${selectedTasks.length} tasks on the board` },
+      { label: "Time blocks", value: String(totalBlocks), detail: `${activeDates.size} active day${activeDates.size === 1 ? "" : "s"}` },
+      { label: "Average block", value: formatHours(averageBlockMinutes), detail: "Average recorded duration" }
     ].forEach((stat) => {
       const card = cards.createDiv({ cls: "chronoboard-stats-card" });
-      card.createDiv({ cls: "chronoboard-stats-value", text: stat.value });
       card.createDiv({ cls: "chronoboard-stats-label", text: stat.label });
+      card.createDiv({ cls: "chronoboard-stats-value", text: stat.value });
+      card.createDiv({ cls: "chronoboard-stats-detail", text: stat.detail });
     });
 
-    const weekSection = wrap.createDiv({ cls: "chronoboard-stats-section" });
-    weekSection.createDiv({ cls: "chronoboard-stats-section-title", text: "This Week by Day" });
-    const weekBars = weekSection.createDiv({ cls: "chronoboard-stats-bars" });
-    this.getWeekDays().forEach((dayMoment) => {
-      const dayKey = dayMoment.format("YYYY-MM-DD");
-      const minutes = selectedTasks.reduce((sum, task) => sum + this.getMinutesForDay(task.timeEntries || [], dayKey), 0);
-      const bar = weekBars.createDiv({ cls: "chronoboard-stats-bar-wrap" });
-      bar.createDiv({
-        cls: `chronoboard-stats-bar ${getHoursColor(minutes)}`,
-        attr: { style: `height:${Math.max((minutes / 480) * 160, 10)}px` }
+    const breakdownSection = wrap.createDiv({ cls: "chronoboard-stats-section chronoboard-stats-breakdown" });
+    breakdownSection.createDiv({ cls: "chronoboard-stats-section-title", text: "Time spent by task" });
+    breakdownSection.createDiv({
+      cls: "chronoboard-stats-section-description",
+      text: "Share of tracked time for each task in this range."
+    });
+    if (!taskStats.length) {
+      breakdownSection.createDiv({ cls: "chronoboard-stats-empty", text: "No tracked time is available for this range." });
+    } else {
+      const visibleBreakdown = taskStats.slice(0, 6).map((item, index) => ({
+        label: this.plugin.getTaskLabel(item.task),
+        minutes: item.minutes,
+        color: normalizeHexColor(item.task.color) || STATS_TASK_COLORS[index % STATS_TASK_COLORS.length]
+      }));
+      if (taskStats.length > 6) {
+        visibleBreakdown.push({
+          label: `Other tasks (${taskStats.length - 6})`,
+          minutes: taskStats.slice(6).reduce((sum, item) => sum + item.minutes, 0),
+          color: "#6b7280"
+        });
+      }
+      let usedShare = 0;
+      const gradientParts = visibleBreakdown.map((item) => {
+        const startShare = usedShare;
+        usedShare += totalMinutes ? (item.minutes / totalMinutes) * 100 : 0;
+        return `${item.color} ${startShare}% ${usedShare}%`;
       });
-      bar.createDiv({ cls: "chronoboard-stats-bar-label", text: dayMoment.format("ddd") });
-      bar.createDiv({ cls: "chronoboard-stats-bar-value", text: formatHours(minutes) });
-    });
+      const breakdownBody = breakdownSection.createDiv({ cls: "chronoboard-stats-breakdown-body" });
+      const donut = breakdownBody.createDiv({ cls: "chronoboard-stats-donut" });
+      donut.style.background = `conic-gradient(${gradientParts.join(", ")})`;
+      donut.setAttr("role", "img");
+      donut.setAttr("aria-label", "Time spent by task");
+      const donutCenter = donut.createDiv({ cls: "chronoboard-stats-donut-center" });
+      donutCenter.createDiv({ cls: "chronoboard-stats-donut-total", text: formatHours(totalMinutes) });
+      donutCenter.createDiv({ cls: "chronoboard-stats-donut-label", text: "total" });
+      const legend = breakdownBody.createDiv({ cls: "chronoboard-stats-breakdown-legend" });
+      visibleBreakdown.forEach((item) => {
+        const row = legend.createDiv({ cls: "chronoboard-stats-breakdown-row" });
+        const label = row.createDiv({ cls: "chronoboard-stats-breakdown-label" });
+        const swatch = label.createSpan({ cls: "chronoboard-stats-breakdown-swatch" });
+        swatch.style.background = item.color;
+        label.createSpan({ cls: "chronoboard-stats-breakdown-name", text: item.label });
+        const share = totalMinutes ? Math.round((item.minutes / totalMinutes) * 100) : 0;
+        row.createDiv({
+          cls: "chronoboard-stats-breakdown-value",
+          text: `${formatHours(item.minutes)} · ${share}%`
+        });
+      });
+    }
 
-    const taskSection = wrap.createDiv({ cls: "chronoboard-stats-section" });
-    taskSection.createDiv({ cls: "chronoboard-stats-section-title", text: "Top Weekly Tasks" });
+    const details = wrap.createDiv({
+      cls: `chronoboard-stats-details${this.statsScope === "year" ? " has-year-heatmap" : ""}`
+    });
+    const activitySection = details.createDiv({ cls: "chronoboard-stats-section" });
+    const chartEntries = taskStats.flatMap((item) => item.entries.map((entry) => ({
+      start: parseFrontmatterDate(entry.startTime),
+      end: parseFrontmatterDate(entry.endTime),
+      minutes: this.entryMinutes(entry)
+    }))).filter((item) => item.start);
+    let chartTitle = "Hours by weekday";
+    let chartDescription = "Combined activity for each weekday in this month.";
+    let chartItems;
+    let heatmapCalendars = null;
+    if (this.statsScope === "day") {
+      chartTitle = "Hours by time of day";
+      chartDescription = "Recorded activity across four parts of the selected day.";
+      chartItems = [
+        { label: "12-6a", startHour: 0, endHour: 6 },
+        { label: "6a-12p", startHour: 6, endHour: 12 },
+        { label: "12-6p", startHour: 12, endHour: 18 },
+        { label: "6p-12a", startHour: 18, endHour: 24 }
+      ].map((bucket) => ({
+        label: bucket.label,
+        minutes: chartEntries.reduce((sum, item) => {
+          const bucketStart = period.start.clone().hour(bucket.startHour).minute(0).second(0).millisecond(0);
+          const bucketEnd = bucket.startHour === 18
+            ? period.start.clone().add(1, "day").startOf("day")
+            : period.start.clone().hour(bucket.endHour).minute(0).second(0).millisecond(0);
+          const entryEnd = item.end && item.end.isAfter(item.start)
+            ? item.end
+            : item.start.clone().add(item.minutes, "minutes");
+          const overlapStart = Math.max(item.start.valueOf(), bucketStart.valueOf());
+          const overlapEnd = Math.min(entryEnd.valueOf(), bucketEnd.valueOf());
+          return sum + Math.max(0, Math.round((overlapEnd - overlapStart) / 60000));
+        }, 0)
+      }));
+    } else if (this.statsScope === "week") {
+      chartTitle = period.label;
+      chartDescription = "Daily tracked time for the selected week.";
+      heatmapCalendars = [{
+        label: null,
+        start: period.start,
+        days: Array.from({ length: 7 }, (_, index) => period.start.clone().add(index, "days"))
+      }];
+    } else if (this.statsScope === "year") {
+      chartTitle = period.label;
+      chartDescription = "Daily tracked time for each month in the selected year.";
+      heatmapCalendars = Array.from({ length: 12 }, (_, index) => {
+        const monthStart = period.start.clone().month(index).startOf("month");
+        return {
+          label: monthStart.format("MMMM"),
+          start: monthStart,
+          days: Array.from({ length: monthStart.daysInMonth() }, (unused, dayIndex) =>
+            monthStart.clone().add(dayIndex, "days")
+          )
+        };
+      });
+    } else if (this.statsScope === "all") {
+      chartTitle = "Hours by year";
+      chartDescription = "Recorded activity across all available years.";
+      const years = new Map();
+      chartEntries.forEach((item) => {
+        const year = item.start.format("YYYY");
+        years.set(year, (years.get(year) || 0) + item.minutes);
+      });
+      chartItems = [...years.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([label, minutes]) => ({ label, minutes }));
+    } else {
+      chartTitle = period.label;
+      chartDescription = "Daily tracked time. Stronger color means more tracked time.";
+      heatmapCalendars = [{
+        label: null,
+        start: period.start,
+        days: Array.from({ length: period.end.date() }, (_, index) => period.start.clone().add(index, "days"))
+      }];
+    }
+    activitySection.createDiv({ cls: "chronoboard-stats-section-title", text: chartTitle });
+    activitySection.createDiv({
+      cls: "chronoboard-stats-section-description",
+      text: chartDescription
+    });
+    if (heatmapCalendars) {
+      const heatmapData = heatmapCalendars.map((calendar) => ({
+        ...calendar,
+        days: calendar.days.map((day) => ({
+          day,
+          minutes: chartEntries.reduce(
+            (sum, item) => sum + (item.start.isSame(day, "day") ? item.minutes : 0),
+            0
+          )
+        }))
+      }));
+      const allDayMinutes = heatmapData.flatMap((calendar) => calendar.days.map((item) => item.minutes));
+      const includeZeroDays = Boolean(this.plugin.settings.heatmapIncludeZeroDays);
+      const scaleMinutes = includeZeroDays ? allDayMinutes : allDayMinutes.filter((minutes) => minutes > 0);
+      const minimumMinutes = scaleMinutes.length ? Math.min(...scaleMinutes) : 0;
+      const maximumMinutes = scaleMinutes.length ? Math.max(...scaleMinutes) : 0;
+      const lowColor = normalizeHexColor(this.plugin.settings.heatmapLowColor) || DEFAULT_SETTINGS.heatmapLowColor;
+      const highColor = normalizeHexColor(this.plugin.settings.heatmapHighColor) || DEFAULT_SETTINGS.heatmapHighColor;
+      const calendarsWrap = activitySection.createDiv({
+        cls: `chronoboard-stats-heatmaps${this.statsScope === "year" ? " is-year" : ""}`
+      });
+      heatmapData.forEach((calendarData) => {
+        const calendarGroup = calendarsWrap.createDiv({ cls: "chronoboard-stats-heatmap-group" });
+        if (calendarData.label) {
+          calendarGroup.createDiv({ cls: "chronoboard-stats-heatmap-month", text: calendarData.label });
+        }
+        const calendar = calendarGroup.createDiv({ cls: "chronoboard-stats-heatmap" });
+        ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach((dayName) => {
+          calendar.createDiv({ cls: "chronoboard-stats-heatmap-weekday", text: dayName });
+        });
+        const leadingCells = calendarData.start.isoWeekday() - 1;
+        for (let index = 0; index < leadingCells; index += 1) {
+          calendar.createDiv({ cls: "chronoboard-stats-heatmap-cell is-empty" });
+        }
+        calendarData.days.forEach((item) => {
+          const shouldColor = item.minutes > 0 || includeZeroDays;
+          const cell = calendar.createDiv({
+            cls: `chronoboard-stats-heatmap-cell${item.minutes ? " has-time" : includeZeroDays ? " is-zero" : ""}`
+          });
+          if (shouldColor) {
+            const ratio = maximumMinutes === minimumMinutes
+              ? item.minutes > 0 ? 1 : 0
+              : (item.minutes - minimumMinutes) / (maximumMinutes - minimumMinutes);
+            const color = mixHexColors(lowColor, highColor, ratio);
+            cell.style.background = color;
+            cell.style.color = getContrastTextColor(color);
+          }
+          cell.setAttr("title", `${item.day.format("MMMM D, YYYY")}: ${formatHours(item.minutes)}`);
+          cell.createDiv({ cls: "chronoboard-stats-heatmap-day", text: item.day.format("D") });
+          cell.createDiv({
+            cls: "chronoboard-stats-heatmap-hours",
+            text: item.minutes || includeZeroDays ? formatHours(item.minutes) : ""
+          });
+        });
+      });
+      const scale = activitySection.createDiv({ cls: "chronoboard-stats-heatmap-scale" });
+      scale.createSpan({ text: scaleMinutes.length ? formatHours(minimumMinutes) : "No time" });
+      const scaleGradient = scale.createSpan({ cls: "chronoboard-stats-heatmap-gradient" });
+      scaleGradient.style.background = `linear-gradient(90deg, ${lowColor}, ${highColor})`;
+      scale.createSpan({ text: scaleMinutes.length ? formatHours(maximumMinutes) : "" });
+    } else {
+      const highestChartMinutes = Math.max(...chartItems.map((item) => item.minutes), 0);
+      const chartBars = activitySection.createDiv({ cls: "chronoboard-stats-bars" });
+      chartBars.style.gridTemplateColumns = `repeat(${Math.max(chartItems.length, 1)}, minmax(36px, 1fr))`;
+      if (!chartItems.length) {
+        chartBars.createDiv({ cls: "chronoboard-stats-empty", text: "No chart data is available for this range." });
+      }
+      chartItems.forEach((item) => {
+        const bar = chartBars.createDiv({ cls: "chronoboard-stats-bar-wrap" });
+        bar.createDiv({ cls: "chronoboard-stats-bar-value", text: formatHours(item.minutes) });
+        bar.createDiv({
+          cls: `chronoboard-stats-bar ${getHoursColor(item.minutes)}`,
+          attr: {
+            style: `height:${highestChartMinutes ? Math.max((item.minutes / highestChartMinutes) * 150, 8) : 8}px`
+          }
+        });
+        bar.createDiv({ cls: "chronoboard-stats-bar-label", text: item.label });
+      });
+    }
+
+    const taskSection = details.createDiv({ cls: "chronoboard-stats-section chronoboard-stats-task-section" });
+    const taskSectionHead = taskSection.createDiv({ cls: "chronoboard-stats-section-head" });
+    taskSectionHead.createDiv({ cls: "chronoboard-stats-section-title", text: "Highest-hour tasks" });
+    taskSectionHead.createDiv({
+      cls: "chronoboard-stats-section-count",
+      text: `${taskStats.length} tracked task${taskStats.length === 1 ? "" : "s"}`
+    });
     const taskList = taskSection.createDiv({ cls: "chronoboard-stats-task-list" });
-    this.sortTasks(selectedTasks)
-      .sort((a, b) => this.getMinutesForWeek(b.timeEntries || []) - this.getMinutesForWeek(a.timeEntries || []))
-      .slice(0, 8)
-      .forEach((task) => {
-        const minutes = this.getMinutesForWeek(task.timeEntries || []);
+    if (!taskStats.length) {
+      taskList.createDiv({ cls: "chronoboard-stats-empty", text: "No tracked time is available for this range." });
+    } else {
+      taskStats.slice(0, 10).forEach((item, index) => {
         const row = taskList.createDiv({ cls: "chronoboard-stats-task-row" });
-        const name = row.createDiv({ cls: "chronoboard-stats-task-name" });
-        name.createDiv({ cls: "chronoboard-task-key", text: task.jiraKey || task.file.basename });
-        const secondaryText = this.plugin.getTaskSecondaryText(task);
+        row.createDiv({ cls: "chronoboard-stats-task-rank", text: String(index + 1) });
+        const content = row.createDiv({ cls: "chronoboard-stats-task-content" });
+        const taskHead = content.createDiv({ cls: "chronoboard-stats-task-head" });
+        const name = taskHead.createDiv({ cls: "chronoboard-stats-task-name" });
+        name.createDiv({ cls: "chronoboard-task-key", text: item.task.jiraKey || item.task.file.basename });
+        const secondaryText = this.plugin.getTaskSecondaryText(item.task);
         if (secondaryText) {
           name.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
         }
-        row.createDiv({ cls: "chronoboard-stats-task-hours", text: formatHours(minutes) });
+        taskHead.createDiv({ cls: "chronoboard-stats-task-hours", text: formatHours(item.minutes) });
+        const meter = content.createDiv({ cls: "chronoboard-stats-task-meter" });
+        meter.createDiv({
+          cls: "chronoboard-stats-task-meter-fill",
+          attr: { style: `width:${totalMinutes ? Math.max((item.minutes / totalMinutes) * 100, 1) : 0}%` }
+        });
+        const meta = content.createDiv({ cls: "chronoboard-stats-task-meta" });
+        const share = totalMinutes ? Math.round((item.minutes / totalMinutes) * 100) : 0;
+        meta.createSpan({ text: `${item.blockCount} block${item.blockCount === 1 ? "" : "s"}` });
+        meta.createSpan({ text: `${item.activeDays} active day${item.activeDays === 1 ? "" : "s"}` });
+        meta.createSpan({ text: `${share}% of tracked time` });
       });
+    }
   }
 
   syncScrollPair(first, second, axis) {
@@ -2639,10 +3189,11 @@ class ChronoboardView extends ItemView {
 
   renderSummary(layout, selectedTasks) {
     const scopedTasks = this.getSummarySortedTasks(selectedTasks);
+    const summaryCopy = this.getSummaryCopy();
     const panel = layout.createDiv({ cls: "chronoboard-panel" });
     const panelHead = panel.createDiv({ cls: "chronoboard-panel-head" });
     panelHead.createDiv({
-      text: this.currentMode === "day" ? "Daily Total" : this.currentMode === "month" ? "Monthly Total" : "Weekly Total"
+      text: summaryCopy.title
     });
     const headMeta = panelHead.createDiv({ cls: "chronoboard-summary-head-meta" });
     headMeta.createDiv({
@@ -2672,7 +3223,7 @@ class ChronoboardView extends ItemView {
     if (!scopedTasks.length) {
       list.createDiv({
         cls: "chronoboard-empty",
-        text: "Weekly totals appear here once tasks are selected."
+        text: "Totals appear here when tasks have tracked time in this range."
       });
       return;
     }
@@ -2690,7 +3241,7 @@ class ChronoboardView extends ItemView {
       card.createDiv({ cls: "chronoboard-summary-hours", text: formatHours(this.getSummaryMinutesForTask(task)) });
       card.createDiv({
         cls: "chronoboard-summary-note",
-        text: this.currentMode === "day" ? "Tracked this day" : this.currentMode === "month" ? "Tracked this month" : "Tracked this week"
+        text: summaryCopy.note
       });
       card.addEventListener("click", async () => {
         this.selectedTaskPath = task.path;
@@ -3215,6 +3766,9 @@ class ChronoboardView extends ItemView {
     if (this.currentMode === "day") {
       return this.getMinutesForDay(task.timeEntries || [], this.focusDate.clone().startOf("day").format("YYYY-MM-DD"));
     }
+    if (this.currentMode === "stats") {
+      return this.getStatsMinutes(task.timeEntries || []);
+    }
     if (this.currentMode === "month") {
       const monthStart = this.focusDate.clone().startOf("month");
       const monthEnd = monthStart.clone().endOf("month");
@@ -3236,6 +3790,9 @@ class ChronoboardView extends ItemView {
         const start = parseFrontmatterDate(entry.startTime);
         return start && start.format("YYYY-MM-DD") === dayKey;
       });
+    }
+    if (this.currentMode === "stats") {
+      return this.getStatsMinutes(task.timeEntries) > 0;
     }
     return task.timeEntries.length > 0;
   }
@@ -3339,6 +3896,8 @@ module.exports = class ChronoboardPlugin extends Plugin {
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.settings.highlightColor = normalizeHexColor(this.settings.highlightColor);
+    this.settings.heatmapLowColor = normalizeHexColor(this.settings.heatmapLowColor) || DEFAULT_SETTINGS.heatmapLowColor;
+    this.settings.heatmapHighColor = normalizeHexColor(this.settings.heatmapHighColor) || DEFAULT_SETTINGS.heatmapHighColor;
   }
 
   async saveSettings(options = {}) {

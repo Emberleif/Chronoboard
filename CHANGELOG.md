@@ -1,5 +1,32 @@
 # Chronoboard Changelog
 
+## Unreleased
+
+### Added
+
+- Added fuzzy search and week-view right-click task selection from the contributor pull request.
+- Added a setting to order the task picker by status or alphabetically.
+- Added monthly task, time block, active day, weekday, and duration statistics.
+- Added day, week, month, year, and all-time statistics ranges.
+- Added a task-share chart to the Stats dashboard.
+- Added low and high color settings for activity heatmaps.
+- Added daily heatmaps to the Week and Year statistics ranges.
+- Added an option to color zero-hour heatmap days.
+
+### Changed
+
+- Reduced the task picker width and added clearer search guidance and spacing.
+- The task picker now uses the same close button style and spacing as the Help modal.
+- Replaced the mixed-period Stats view with a monthly activity dashboard.
+- Statistics navigation and charts now adapt to the selected range.
+- Monthly statistics now use a calendar heatmap instead of weekday bars.
+
+### Fixed
+
+- The totals rail now uses the selected Stats range in its title and task captions.
+- Totals cards no longer shrink when the rail contains many tasks.
+- Daily time-of-day bars now split blocks across each time range that they overlap.
+
 ## 0.8.1
 
 ### Added
