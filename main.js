@@ -15,6 +15,7 @@ const {
 } = require("obsidian");
 
 const VIEW_TYPE = "chronoboard-view";
+const RECOVERY_JOURNAL_VERSION = 2;
 const PX_PER_HOUR = 56;
 const STATUS_SORT_ORDER = {
   "in progress": 0,
@@ -3884,6 +3885,8 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.savedIndicatorTimer = null;
     this.savedIndicatorEl = null;
 
+    await this.recoverInterruptedTimeEntrySaves();
+
     this.registerView(VIEW_TYPE, (leaf) => new ChronoboardView(leaf, this));
 
     this.addRibbonIcon("blocks", "Open Chronoboard", async () => {
@@ -4007,11 +4010,137 @@ module.exports = class ChronoboardPlugin extends Plugin {
     }
   }
 
+  getRecoveryJournalKey() {
+    return `chronoboard-time-entry-recovery:${RECOVERY_JOURNAL_VERSION}:${this.app.vault.getName()}`;
+  }
+
+  readTimeEntryRecoveryJournal() {
+    try {
+      const journal = JSON.parse(window.localStorage.getItem(this.getRecoveryJournalKey()) || "[]");
+      return Array.isArray(journal) ? journal : [];
+    } catch (error) {
+      console.error("Chronoboard could not read its time-entry recovery journal.", error);
+      return [];
+    }
+  }
+
+  writeTimeEntryRecoveryJournal(journal) {
+    try {
+      const key = this.getRecoveryJournalKey();
+      if (journal.length) {
+        window.localStorage.setItem(key, JSON.stringify(journal));
+      } else {
+        window.localStorage.removeItem(key);
+      }
+    } catch (error) {
+      console.error("Chronoboard could not update its time-entry recovery journal.", error);
+    }
+  }
+
+  appendTimeEntryRecoveryOperation(path, type, payload) {
+    const journal = this.readTimeEntryRecoveryJournal();
+    journal.push({
+      id: createEntryId(),
+      path,
+      type,
+      payload: JSON.parse(JSON.stringify(payload)),
+      updatedAt: Date.now()
+    });
+    this.writeTimeEntryRecoveryJournal(journal);
+  }
+
+  clearTimeEntryRecoveryOperations(operationIds) {
+    const completed = new Set(operationIds);
+    const journal = this.readTimeEntryRecoveryJournal();
+    this.writeTimeEntryRecoveryJournal(journal.filter((operation) => !completed.has(operation.id)));
+  }
+
+  async recoverInterruptedTimeEntrySaves() {
+    const journal = this.readTimeEntryRecoveryJournal();
+    const operationsByPath = new Map();
+    journal.forEach((operation) => {
+      if (!operation?.path || !operation?.type || !operation?.id) {
+        return;
+      }
+      const operations = operationsByPath.get(operation.path) || [];
+      operations.push(operation);
+      operationsByPath.set(operation.path, operations);
+    });
+    let recoveredCount = 0;
+    for (const [path, operations] of operationsByPath) {
+      let file = this.app.vault.getAbstractFileByPath(path);
+      if (!(file instanceof TFile)) {
+        const name = path.split("/").pop();
+        const matches = this.app.vault.getMarkdownFiles().filter((candidate) => candidate.name === name);
+        file = matches.length === 1 ? matches[0] : null;
+      }
+      if (!(file instanceof TFile)) {
+        continue;
+      }
+      try {
+        let didRecover = false;
+        await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+          let entries = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
+          operations.forEach((operation) => {
+            const { type, payload } = operation;
+            const entry = payload?.entry;
+            const findEntryIndex = () => entries.findIndex((candidate, index) => {
+              if (entry?.id && candidate.id === entry.id) {
+                return true;
+              }
+              if (type === "update") {
+                return index === payload?.entryIndex;
+              }
+              return index === payload?.entryIndex
+                && candidate.startTime === entry?.startTime
+                && candidate.endTime === entry?.endTime;
+            });
+            if (type === "add" && entry) {
+              if (findEntryIndex() === -1) {
+                entries.push(entry);
+                didRecover = true;
+              }
+            } else if (type === "update" && entry) {
+              const index = findEntryIndex();
+              if (index === -1) {
+                entries.push(entry);
+                didRecover = true;
+              } else {
+                if (JSON.stringify(entries[index]) !== JSON.stringify(entry)) {
+                  entries[index] = entry;
+                  didRecover = true;
+                }
+              }
+            } else if (type === "remove" && entry) {
+              const index = findEntryIndex();
+              if (index !== -1) {
+                entries.splice(index, 1);
+                didRecover = true;
+              }
+            }
+          });
+          entries.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+          frontmatter.timeEntries = entries;
+        });
+        this.clearTimeEntryRecoveryOperations(operations.map((operation) => operation.id));
+        if (didRecover) {
+          recoveredCount += 1;
+        }
+      } catch (error) {
+        console.error(`Chronoboard could not recover time entries for ${path}.`, error);
+      }
+    }
+    if (recoveredCount > 0) {
+      new Notice(`Chronoboard recovered time entries for ${recoveredCount} task${recoveredCount === 1 ? "" : "s"}.`);
+    }
+  }
+
   scheduleSaveConfirmation() {
     window.clearTimeout(this.saveConfirmationTimer);
     this.saveConfirmationTimer = window.setTimeout(async () => {
       try {
         await this.queueSettingsSave();
+        await Promise.all([...this.frontmatterSaveQueues.values()]);
         this.showSavedIndicator();
       } catch (error) {
         console.error("Chronoboard could not save its settings.", error);
@@ -4754,14 +4883,14 @@ module.exports = class ChronoboardPlugin extends Plugin {
   }
 
   async addTimeEntry(file, entry, options = {}) {
-    let storedEntry = null;
+    const storedEntry = {
+      ...entry,
+      id: entry.id || createEntryId()
+    };
     let storedIndex = -1;
+    this.appendTimeEntryRecoveryOperation(file.path, "add", { entry: storedEntry });
     await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
-      storedEntry = {
-        ...entry,
-        id: entry.id || createEntryId()
-      };
       existing.push(storedEntry);
       existing.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
       storedIndex = existing.findIndex((candidate) => candidate.id === storedEntry.id);
@@ -4782,6 +4911,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
 
   async removeTimeEntry(file, entry, entryIndex, options = {}) {
     let removedEntry = null;
+    this.appendTimeEntryRecoveryOperation(file.path, "remove", { entry, entryIndex });
     await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
       frontmatter.timeEntries = existing.filter((candidate, index) => {
@@ -4807,6 +4937,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
   }
 
   async updateTimeEntry(file, entryIndex, updatedEntry) {
+    this.appendTimeEntryRecoveryOperation(file.path, "update", { entry: updatedEntry, entryIndex });
     await this.processTaskFrontMatter(file, (frontmatter) => {
       const existing = Array.isArray(frontmatter.timeEntries) ? [...frontmatter.timeEntries] : [];
       if (entryIndex >= 0 && entryIndex < existing.length) {
