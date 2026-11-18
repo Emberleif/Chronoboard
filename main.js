@@ -11,7 +11,6 @@ const {
   TFile,
   TFolder,
   setIcon,
-  setTooltip,
   moment,
 } = require("obsidian");
 
@@ -309,6 +308,17 @@ function normalizeVaultFolder(value) {
 
 function escapeCsvValue(value) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function escapeMarkdownTableCell(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .trim();
 }
 
 function createEntryId() {
@@ -2980,8 +2990,10 @@ class ChronoboardView extends ItemView {
       block.style.height = `${position.sizePx}px`;
     }
     const secondaryText = this.plugin.getTaskSecondaryText(task);
-    const durationMinutes = moment(renderedEntry.endTime).diff(moment(renderedEntry.startTime), "minutes");
-    const hideTimeLine = (horizontal ? position.sizePx < 92 : durationMinutes <= 30) || Boolean(secondaryText);
+    const durationMinutes = this.entryMinutes(renderedEntry);
+    const hideTimeLine = horizontal
+      ? position.sizePx < (secondaryText ? 140 : 92)
+      : durationMinutes <= (secondaryText ? 60 : 30);
     const showStatus = this.shouldDisplayTaskStatus(task) && (horizontal ? position.sizePx >= 150 : true);
     this.applyTicketSurfaceStyle(block, task, true);
     const titleText = task.jiraKey || task.file.basename;
@@ -3009,7 +3021,7 @@ class ChronoboardView extends ItemView {
         text: timeRangeText
       });
     } else {
-      setTooltip(block, `${titleText}\n${timeRangeText}`, { delay: 300 });
+      block.setAttr("title", `${titleText}\n${timeRangeText}`);
     }
     if (entry.label) {
       block.createDiv({
@@ -4483,14 +4495,28 @@ module.exports = class ChronoboardPlugin extends Plugin {
   }
 
   buildTimeLogMarkdown(task) {
-    const entries = Array.isArray(task.timeEntries) ? [...task.timeEntries] : [];
+    const entries = (Array.isArray(task.timeEntries) ? task.timeEntries : [])
+      .map((entry) => {
+        const start = parseFrontmatterDate(entry.startTime);
+        const end = parseFrontmatterDate(entry.endTime);
+        if (!start || !end || !end.isAfter(start)) {
+          return null;
+        }
+        return {
+          entry,
+          start,
+          end,
+          minutes: end.diff(start, "minutes")
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.start.valueOf() - b.start.valueOf());
     if (!entries.length) {
-      return "_No time entries yet._";
+      return "_No valid time entries are available._";
     }
-    entries.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
     const weeks = new Map();
-    entries.forEach((entry) => {
-      const start = moment(entry.startTime);
+    entries.forEach((record) => {
+      const { start } = record;
       const weekKey = start.format("GGGG-[W]WW");
       if (!weeks.has(weekKey)) {
         weeks.set(weekKey, { weekStart: start.clone().startOf("isoWeek"), days: new Map() });
@@ -4500,11 +4526,10 @@ module.exports = class ChronoboardPlugin extends Plugin {
       if (!week.days.has(dayKey)) {
         week.days.set(dayKey, []);
       }
-      week.days.get(dayKey).push(entry);
+      week.days.get(dayKey).push(record);
     });
 
-    const entryMinutes = (entry) => moment(entry.endTime).diff(moment(entry.startTime), "minutes");
-    const sumMinutes = (list) => list.reduce((sum, entry) => sum + entryMinutes(entry), 0);
+    const sumMinutes = (list) => list.reduce((sum, record) => sum + record.minutes, 0);
 
     const newestFirst = this.settings.timeLogNewestFirst;
     const weekKeys = [...weeks.keys()].sort();
@@ -4523,11 +4548,9 @@ module.exports = class ChronoboardPlugin extends Plugin {
       const dayBlocks = dayKeys.map((dayKey) => {
         const dayEntries = week.days.get(dayKey);
         const dayLabel = `${moment(dayKey).format("dddd, MMM D")} (${formatHours(sumMinutes(dayEntries))})`;
-        const rows = dayEntries.map((entry) => {
-          const start = moment(entry.startTime);
-          const end = moment(entry.endTime);
-          const note = String(entry.label || "").replace(/\|/g, "\\|");
-          return `| ${start.format("HH:mm")} | ${end.format("HH:mm")} | ${formatHours(entryMinutes(entry))} | ${note} |`;
+        const rows = dayEntries.map((record) => {
+          const note = escapeMarkdownTableCell(record.entry.label);
+          return `| ${record.start.format("HH:mm")} | ${record.end.format("HH:mm")} | ${formatHours(record.minutes)} | ${note} |`;
         });
         const table = ["| Start | End | Duration | Note |", "|:---|:---|:---|:---|", ...rows].join("\n");
         return `<details class="chronoboard-log-day">\n<summary>${dayLabel}</summary>\n\n${table}\n\n</details>`;

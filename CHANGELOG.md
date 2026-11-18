@@ -1,6 +1,20 @@
 # Chronoboard Changelog
 
-## Unreleased
+## 0.8.3
+
+### Added
+
+- Added a per-task time log grouped by week and day from Philip's contribution.
+- Added a newest-first option to the time log.
+- Added time-range tooltips for short or crowded time blocks from Philip's contribution.
+
+### Fixed
+
+- Time logs now ignore invalid and reversed time entries.
+- Multiline time-block notes no longer break time-log tables.
+- Large blocks with subtitles can show their time range when space is available.
+
+## 0.8.2
 
 ### Added
 
