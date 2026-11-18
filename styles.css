@@ -700,6 +700,39 @@
   }
 }
 
+.chronoboard-time-log-modal {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+}
+
+.chronoboard-time-log-modal .modal-content {
+  padding-right: 4px;
+}
+
+.chronoboard-time-log-content {
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  padding-right: 16px;
+}
+
+.chronoboard-time-log-content table {
+  width: 100%;
+}
+
+.chronoboard-time-log-content summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.chronoboard-time-log-content .chronoboard-log-week {
+  margin-bottom: 10px;
+}
+
+.chronoboard-time-log-content .chronoboard-log-day {
+  margin-left: 20px;
+  margin-top: 6px;
+}
+
 .chronoboard-export-modal {
   width: min(720px, calc(100vw - 32px));
   max-width: 720px;
