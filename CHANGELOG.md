@@ -1,5 +1,13 @@
 # Chronoboard Changelog
 
+## 0.8.4
+
+### Fixed
+
+- Chronoboard now keeps time-entry operations in a recovery journal until the next launch.
+- Chronoboard now restores an add, update, or removal if shutdown interrupts or overwrites the frontmatter write.
+- The `Saved` notice now waits for settings and task frontmatter writes to finish.
+
 ## 0.8.3
 
 ### Added
