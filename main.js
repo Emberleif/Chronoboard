@@ -73,7 +73,8 @@ const DEFAULT_SETTINGS = {
   forceDarkTextOnColored: false,
   taskPickerSort: "status",
   exportFolder: "Chronoboard Exports",
-  compressedCsvExport: false
+  compressedCsvExport: false,
+  timeLogNewestFirst: true
 };
 
 function normalizeStatus(value) {
@@ -669,6 +670,51 @@ class TicketSubtitleModal extends Modal {
     });
 
     cancelButton.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class TimeLogModal extends Modal {
+  constructor(app, plugin, task) {
+    super(app);
+    this.plugin = plugin;
+    this.task = task;
+  }
+
+  async onOpen() {
+    this.modalEl.addClass("chronoboard-time-log-modal");
+    this.titleEl.setText(`Time log: ${this.plugin.getTaskLabel(this.task)}`);
+    const { contentEl } = this;
+    contentEl.empty();
+
+    new Setting(contentEl)
+      .setName("Newest first")
+      .setDesc("Order weeks and days with the most recent at the top.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.timeLogNewestFirst);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.timeLogNewestFirst = value;
+          await this.plugin.saveSettings();
+          await this.renderLog();
+        });
+      });
+
+    this.logContainer = contentEl.createDiv({ cls: "chronoboard-time-log-content" });
+    await this.renderLog();
+  }
+
+  async renderLog() {
+    this.logContainer.empty();
+    await MarkdownRenderer.render(
+      this.app,
+      this.plugin.buildTimeLogMarkdown(this.task),
+      this.logContainer,
+      this.task.file.path,
+      this.plugin
+    );
   }
 
   onClose() {
@@ -3037,6 +3083,12 @@ class ChronoboardView extends ItemView {
       );
       menu.addItem((item) =>
         item
+          .setTitle("Show time log")
+          .setIcon("table")
+          .onClick(() => new TimeLogModal(this.app, this.plugin, task).open())
+      );
+      menu.addItem((item) =>
+        item
           .setTitle("Edit task block text")
           .setIcon("text-cursor-input")
           .onClick(() => {
@@ -3287,6 +3339,12 @@ class ChronoboardView extends ItemView {
         .setTitle("Edit task subtitle")
         .setIcon("text")
         .onClick(() => this.openSubtitleModal(task))
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle("Show time log")
+        .setIcon("table")
+        .onClick(() => new TimeLogModal(this.app, this.plugin, task).open())
     );
     if (!this.isStaticTask(task.path)) {
       menu.addSeparator();
@@ -4422,6 +4480,62 @@ module.exports = class ChronoboardPlugin extends Plugin {
       }
     }
     return map;
+  }
+
+  buildTimeLogMarkdown(task) {
+    const entries = Array.isArray(task.timeEntries) ? [...task.timeEntries] : [];
+    if (!entries.length) {
+      return "_No time entries yet._";
+    }
+    entries.sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
+    const weeks = new Map();
+    entries.forEach((entry) => {
+      const start = moment(entry.startTime);
+      const weekKey = start.format("GGGG-[W]WW");
+      if (!weeks.has(weekKey)) {
+        weeks.set(weekKey, { weekStart: start.clone().startOf("isoWeek"), days: new Map() });
+      }
+      const dayKey = start.format("YYYY-MM-DD");
+      const week = weeks.get(weekKey);
+      if (!week.days.has(dayKey)) {
+        week.days.set(dayKey, []);
+      }
+      week.days.get(dayKey).push(entry);
+    });
+
+    const entryMinutes = (entry) => moment(entry.endTime).diff(moment(entry.startTime), "minutes");
+    const sumMinutes = (list) => list.reduce((sum, entry) => sum + entryMinutes(entry), 0);
+
+    const newestFirst = this.settings.timeLogNewestFirst;
+    const weekKeys = [...weeks.keys()].sort();
+    if (newestFirst) {
+      weekKeys.reverse();
+    }
+    const sections = weekKeys.map((weekKey, weekIndex) => {
+      const week = weeks.get(weekKey);
+      const weekEntries = [...week.days.values()].flat();
+      const weekLabel = `Week of ${week.weekStart.format("MMM D")} – ${week.weekStart.clone().endOf("isoWeek").format("MMM D")} (${formatHours(sumMinutes(weekEntries))})`;
+
+      const dayKeys = [...week.days.keys()].sort();
+      if (newestFirst) {
+        dayKeys.reverse();
+      }
+      const dayBlocks = dayKeys.map((dayKey) => {
+        const dayEntries = week.days.get(dayKey);
+        const dayLabel = `${moment(dayKey).format("dddd, MMM D")} (${formatHours(sumMinutes(dayEntries))})`;
+        const rows = dayEntries.map((entry) => {
+          const start = moment(entry.startTime);
+          const end = moment(entry.endTime);
+          const note = String(entry.label || "").replace(/\|/g, "\\|");
+          return `| ${start.format("HH:mm")} | ${end.format("HH:mm")} | ${formatHours(entryMinutes(entry))} | ${note} |`;
+        });
+        const table = ["| Start | End | Duration | Note |", "|---|---|---|---|", ...rows].join("\n");
+        return `<details class="chronoboard-log-day">\n<summary>${dayLabel}</summary>\n\n${table}\n\n</details>`;
+      });
+
+      return `<details class="chronoboard-log-week"${weekIndex === 0 ? " open" : ""}>\n<summary>${weekLabel}</summary>\n\n${dayBlocks.join("\n\n")}\n\n</details>`;
+    });
+    return sections.join("\n\n");
   }
 
   getTaskFromFile(file) {
