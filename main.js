@@ -4529,7 +4529,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
           const note = String(entry.label || "").replace(/\|/g, "\\|");
           return `| ${start.format("HH:mm")} | ${end.format("HH:mm")} | ${formatHours(entryMinutes(entry))} | ${note} |`;
         });
-        const table = ["| Start | End | Duration | Note |", "|---|---|---|---|", ...rows].join("\n");
+        const table = ["| Start | End | Duration | Note |", "|:---|:---|:---|:---|", ...rows].join("\n");
         return `<details class="chronoboard-log-day">\n<summary>${dayLabel}</summary>\n\n${table}\n\n</details>`;
       });
 
