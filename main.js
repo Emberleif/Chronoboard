@@ -11,6 +11,7 @@ const {
   TFile,
   TFolder,
   setIcon,
+  setTooltip,
   moment,
 } = require("obsidian");
 
@@ -2932,13 +2933,16 @@ class ChronoboardView extends ItemView {
       block.style.top = `${position.startPx}px`;
       block.style.height = `${position.sizePx}px`;
     }
-    const hideTimeLine = horizontal ? position.sizePx < 92 : false;
+    const secondaryText = this.plugin.getTaskSecondaryText(task);
+    const durationMinutes = moment(renderedEntry.endTime).diff(moment(renderedEntry.startTime), "minutes");
+    const hideTimeLine = (horizontal ? position.sizePx < 92 : durationMinutes <= 30) || Boolean(secondaryText);
     const showStatus = this.shouldDisplayTaskStatus(task) && (horizontal ? position.sizePx >= 150 : true);
     this.applyTicketSurfaceStyle(block, task, true);
+    const titleText = task.jiraKey || task.file.basename;
     const head = block.createDiv({ cls: "chronoboard-block-head" });
     head.createDiv({
       cls: "chronoboard-task-name",
-      text: task.jiraKey || task.file.basename
+      text: titleText
     });
     if (showStatus) {
       head.createDiv({
@@ -2946,18 +2950,20 @@ class ChronoboardView extends ItemView {
         text: task.status
       });
     }
-    const secondaryText = this.plugin.getTaskSecondaryText(task);
     if (secondaryText) {
       block.createDiv({
         cls: "chronoboard-block-subtitle",
         text: secondaryText
       });
     }
+    const timeRangeText = `${moment(renderedEntry.startTime).format("HH:mm")} to ${moment(renderedEntry.endTime).format("HH:mm")}`;
     if (!hideTimeLine) {
       block.createDiv({
         cls: "chronoboard-block-time",
-        text: `${moment(renderedEntry.startTime).format("HH:mm")} to ${moment(renderedEntry.endTime).format("HH:mm")}`
+        text: timeRangeText
       });
+    } else {
+      setTooltip(block, `${titleText}\n${timeRangeText}`, { delay: 300 });
     }
     if (entry.label) {
       block.createDiv({
