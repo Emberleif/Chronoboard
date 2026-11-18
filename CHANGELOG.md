@@ -1,5 +1,11 @@
 # Chronoboard Changelog
 
+## 0.8.5
+
+### Fixed
+
+- Restored the stylesheet in the Community Plugins release package.
+
 ## 0.8.4
 
 ### Fixed
