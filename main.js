@@ -1,5 +1,6 @@
 const {
   FuzzySuggestModal,
+  getIconIds,
   ItemView,
   MarkdownRenderer,
   Menu,
@@ -40,6 +41,17 @@ const SUMMARY_SORT_ICONS = {
 };
 
 const STATS_SCOPE_ORDER = ["day", "week", "month", "year", "all"];
+const QUICK_ACTION_SWATCH_COLORS = {
+  red: "#e05252",
+  orange: "#e58a34",
+  yellow: "#d7b84b",
+  green: "#48a867",
+  cyan: "#3aa6a6",
+  blue: "#4f8ad9",
+  purple: "#8b5cf6",
+  pink: "#d45d9e",
+  gray: "#858585"
+};
 const STATS_SCOPE_TITLES = {
   day: "Daily Statistics",
   week: "Weekly Statistics",
@@ -74,7 +86,12 @@ const DEFAULT_SETTINGS = {
   taskPickerSort: "status",
   exportFolder: "Chronoboard Exports",
   compressedCsvExport: false,
-  timeLogNewestFirst: true
+  timeLogNewestFirst: true,
+  quickActionBarEnabled: false,
+  quickActionBarScrollable: true,
+  quickActionCurvedButtons: false,
+  quickActionBarPadding: 3,
+  quickActions: []
 };
 
 function normalizeStatus(value) {
@@ -238,6 +255,17 @@ function normalizeHexColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test(withHash) ? withHash : "";
 }
 
+function getIconicCssColor(value) {
+  const hexColor = normalizeHexColor(value);
+  if (hexColor) {
+    return hexColor;
+  }
+  const colorName = String(value || "").trim().toLowerCase();
+  return ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"].includes(colorName)
+    ? `var(--color-${colorName})`
+    : "";
+}
+
 function getHighlightCssValue(value) {
   return normalizeHexColor(value) || "var(--interactive-accent)";
 }
@@ -286,6 +314,20 @@ function getContrastTextColor(hexColor) {
   const b = parseInt(hex.slice(4, 6), 16);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.62 ? "#111111" : "#ffffff";
+}
+
+function fitTextToWidth(element, minimumFontSize = 9) {
+  window.requestAnimationFrame(() => {
+    if (!element.isConnected) {
+      return;
+    }
+    element.style.removeProperty("font-size");
+    let fontSize = Number.parseFloat(window.getComputedStyle(element).fontSize);
+    while (element.scrollWidth > element.clientWidth && fontSize > minimumFontSize) {
+      fontSize -= 0.5;
+      element.style.fontSize = `${fontSize}px`;
+    }
+  });
 }
 
 function sanitizeFileSegment(value) {
@@ -729,6 +771,497 @@ class TimeLogModal extends Modal {
   }
 
   onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class QuickActionNoteSuggest {
+  constructor(app, inputEl, onSelect) {
+    this.app = app;
+    this.inputEl = inputEl;
+    this.onSelect = onSelect;
+    this.suggestions = [];
+    this.selectedIndex = 0;
+    this.handleInput = () => this.updateSuggestions();
+    this.handleKeydown = (event) => this.onKeydown(event);
+    this.handleBlur = () => window.setTimeout(() => this.close(), 120);
+    inputEl.addEventListener("input", this.handleInput);
+    inputEl.addEventListener("keydown", this.handleKeydown);
+    inputEl.addEventListener("blur", this.handleBlur);
+  }
+
+  getSuggestions(inputValue = this.inputEl.value) {
+    const value = String(inputValue || "").trim();
+    if (!value) {
+      return [];
+    }
+    const query = value.replace(/^\[\[/, "").replace(/\]\]$/, "").trim().toLowerCase();
+    return this.app.vault.getMarkdownFiles()
+      .filter((file) => !query
+        || file.basename.toLowerCase().includes(query)
+        || file.path.toLowerCase().includes(query))
+      .sort((a, b) => a.basename.localeCompare(b.basename))
+      .slice(0, 50);
+  }
+
+  updateSuggestions() {
+    this.suggestions = this.getSuggestions();
+    this.selectedIndex = 0;
+    this.render();
+  }
+
+  render() {
+    this.close();
+    if (!this.suggestions.length || !this.inputEl.isConnected) {
+      return;
+    }
+    const documentRef = this.inputEl.ownerDocument;
+    const windowRef = documentRef.defaultView;
+    const inputRect = this.inputEl.getBoundingClientRect();
+    const width = Math.min(Math.max(inputRect.width, 420), windowRef.innerWidth - 24);
+    const left = Math.min(inputRect.left, windowRef.innerWidth - width - 12);
+    this.containerEl = documentRef.body.createDiv({
+      cls: "suggestion-container chronoboard-note-suggest-container"
+    });
+    this.containerEl.style.zIndex = "100000";
+    this.containerEl.style.width = `${width}px`;
+    this.containerEl.style.left = `${Math.max(12, left)}px`;
+    if (windowRef.innerHeight - inputRect.bottom >= 220) {
+      this.containerEl.style.top = `${inputRect.bottom + 4}px`;
+    } else {
+      this.containerEl.style.bottom = `${windowRef.innerHeight - inputRect.top + 4}px`;
+    }
+    this.suggestions.forEach((file, index) => {
+      const item = this.containerEl.createDiv({
+        cls: `suggestion-item${index === this.selectedIndex ? " is-selected" : ""}`
+      });
+      item.createDiv({ cls: "chronoboard-note-suggest-name", text: file.basename });
+      item.createDiv({ cls: "chronoboard-note-suggest-path", text: file.path });
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.selectSuggestion(file);
+      });
+    });
+  }
+
+  onKeydown(event) {
+    if (!this.containerEl || !this.suggestions.length) {
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      this.selectedIndex = (this.selectedIndex + direction + this.suggestions.length) % this.suggestions.length;
+      this.render();
+      this.containerEl?.querySelector(".suggestion-item.is-selected")?.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectSuggestion(this.suggestions[this.selectedIndex]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.close();
+    }
+  }
+
+  selectSuggestion(file) {
+    let linkText = file.path.replace(/\.md$/i, "");
+    if (typeof this.app.metadataCache.fileToLinktext === "function") {
+      try {
+        linkText = this.app.metadataCache.fileToLinktext(file, "", true) || linkText;
+      } catch (error) {
+        console.error("Chronoboard could not create a short note link.", error);
+      }
+    }
+    const value = linkText;
+    this.inputEl.value = value;
+    this.onSelect(value);
+    this.close();
+    this.inputEl.focus();
+  }
+
+  close() {
+    this.containerEl?.remove();
+    this.containerEl = null;
+  }
+
+  destroy() {
+    this.close();
+    this.inputEl.removeEventListener("input", this.handleInput);
+    this.inputEl.removeEventListener("keydown", this.handleKeydown);
+    this.inputEl.removeEventListener("blur", this.handleBlur);
+  }
+}
+
+class QuickActionIconPickerModal extends Modal {
+  constructor(app, plugin, action, onSave) {
+    super(app);
+    this.plugin = plugin;
+    this.action = action;
+    this.onSave = onSave;
+    this.selectedIcon = String(action.icon || "");
+    this.selectedColor = String(action.iconColor || "");
+    this.query = "";
+    this.iconIds = typeof getIconIds === "function" ? getIconIds() : [];
+  }
+
+  onOpen() {
+    this.modalEl.addClass("chronoboard-icon-picker-modal");
+    this.titleEl.setText("Choose an icon");
+    this.contentEl.empty();
+
+    const previewRow = this.contentEl.createDiv({ cls: "chronoboard-icon-picker-preview-row" });
+    this.previewEl = previewRow.createDiv({ cls: "chronoboard-icon-picker-preview" });
+    const automaticButton = previewRow.createEl("button", {
+      text: this.action.actionType === "url" ? "Use link icon" : "Use note icon"
+    });
+    automaticButton.addEventListener("click", () => {
+      this.selectedIcon = "";
+      this.refreshPreview();
+      this.renderIcons();
+    });
+    previewRow.createDiv({
+      cls: "chronoboard-icon-picker-automatic-help",
+      text: this.action.actionType === "url"
+        ? "Uses the standard external-link icon."
+        : "Uses the target note's Iconic icon and color when available. Otherwise, it uses the file icon."
+    });
+
+    const search = this.contentEl.createEl("input", { cls: "chronoboard-icon-picker-search" });
+    search.type = "search";
+    search.placeholder = "Search icons";
+    search.addEventListener("input", () => {
+      this.query = search.value.trim().toLowerCase();
+      this.renderIcons();
+    });
+
+    const colorSection = this.contentEl.createDiv({ cls: "chronoboard-icon-picker-colors" });
+    colorSection.createDiv({ cls: "chronoboard-icon-picker-label", text: "Icon color" });
+    const swatches = colorSection.createDiv({ cls: "chronoboard-icon-color-swatches" });
+    ["", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"].forEach((color) => {
+      const swatch = swatches.createEl("button", {
+        cls: `chronoboard-icon-color-swatch${color ? " has-color" : ""}${this.selectedColor === color ? " is-selected" : ""}`
+      });
+      swatch.setAttr("aria-label", color ? `${color} icon` : "Automatic icon color");
+      swatch.setAttr("title", color ? color[0].toUpperCase() + color.slice(1) : "Automatic");
+      if (color) {
+        swatch.style.setProperty("--chronoboard-swatch-color", QUICK_ACTION_SWATCH_COLORS[color]);
+        swatch.style.backgroundColor = QUICK_ACTION_SWATCH_COLORS[color];
+        swatch.style.backgroundImage = "none";
+      } else {
+        setIcon(swatch, "rotate-ccw");
+      }
+      swatch.addEventListener("click", () => {
+        this.selectedColor = color;
+        this.renderColorSelection();
+        this.refreshPreview();
+        this.renderIcons();
+      });
+    });
+    this.gridEl = this.contentEl.createDiv({ cls: "chronoboard-icon-picker-grid" });
+    this.renderIcons();
+    this.refreshPreview();
+
+    const footer = this.contentEl.createDiv({ cls: "chronoboard-modal-actions" });
+    const cancel = footer.createEl("button", { text: "Cancel" });
+    cancel.addEventListener("click", () => this.close());
+    const save = footer.createEl("button", { cls: "mod-cta", text: "Use icon" });
+    save.addEventListener("click", () => {
+      this.onSave(this.selectedIcon, this.selectedColor);
+      this.close();
+    });
+    window.setTimeout(() => search.focus(), 0);
+  }
+
+  renderColorSelection() {
+    this.contentEl.querySelectorAll(".chronoboard-icon-color-swatch").forEach((swatch, index) => {
+      const colors = ["", "red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink", "gray"];
+      swatch.toggleClass("is-selected", colors[index] === this.selectedColor);
+    });
+  }
+
+  refreshPreview() {
+    this.previewEl.empty();
+    const icon = this.previewEl.createSpan();
+    const visual = this.selectedIcon
+      ? { icon: this.selectedIcon, color: getIconicCssColor(this.selectedColor) }
+      : this.plugin.getQuickActionVisual({
+        ...this.action,
+        icon: "",
+        iconColor: this.selectedColor
+      });
+    setIcon(icon, visual.icon || (this.action.actionType === "url" ? "external-link" : "file"));
+    const color = visual.color;
+    if (color) {
+      icon.style.color = color;
+    }
+  }
+
+  renderIcons() {
+    if (!this.gridEl) {
+      return;
+    }
+    this.gridEl.empty();
+    const matches = this.iconIds
+      .filter((iconId) => !this.query || iconId.toLowerCase().includes(this.query))
+      .slice(0, 400);
+    matches.forEach((iconId) => {
+      const button = this.gridEl.createEl("button", {
+        cls: `chronoboard-icon-picker-button${this.selectedIcon === iconId ? " is-selected" : ""}`
+      });
+      button.setAttr("aria-label", iconId);
+      button.setAttr("title", iconId.replace(/^lucide-/, ""));
+      setIcon(button, iconId);
+      const color = getIconicCssColor(this.selectedColor);
+      if (color) {
+        button.style.color = color;
+      }
+      button.addEventListener("click", () => {
+        this.selectedIcon = iconId;
+        this.refreshPreview();
+        this.renderIcons();
+      });
+    });
+    if (!matches.length) {
+      this.gridEl.createDiv({ cls: "chronoboard-icon-picker-empty", text: "No icons match this search." });
+    }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class QuickActionManagerModal extends Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.actions = JSON.parse(JSON.stringify(plugin.settings.quickActions || []));
+    this.noteSuggests = [];
+    this.focusActionId = null;
+    if (Number.isInteger(options.addAtIndex)) {
+      const action = this.createAction();
+      const index = clampNumber(options.addAtIndex, 0, this.actions.length);
+      this.actions.splice(index, 0, action);
+      this.focusActionId = action.id;
+    }
+  }
+
+  createAction() {
+    return {
+      id: `quick-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      displayType: "text",
+      label: "New button",
+      icon: "",
+      iconColor: "",
+      actionType: "note",
+      target: ""
+    };
+  }
+
+  addAction(index = this.actions.length) {
+    const action = this.createAction();
+    this.actions.splice(clampNumber(index, 0, this.actions.length), 0, action);
+    this.focusActionId = action.id;
+    this.renderActions();
+  }
+
+  onOpen() {
+    this.modalEl.addClass("chronoboard-quick-action-modal");
+    this.titleEl.setText("Manage Linkbar buttons");
+    this.contentEl.empty();
+    this.contentEl.createDiv({
+      cls: "chronoboard-quick-action-intro",
+      text: "Add note or web link buttons to the Linkbar. Icon buttons use the target note's Iconic icon when the custom icon field is empty."
+    });
+
+    const topActions = this.contentEl.createDiv({ cls: "chronoboard-quick-action-top" });
+    const addButton = topActions.createEl("button", { cls: "mod-cta", text: "Add button" });
+    addButton.addEventListener("click", () => {
+      this.addAction();
+    });
+
+    this.listEl = this.contentEl.createDiv({ cls: "chronoboard-quick-action-list" });
+    this.renderActions();
+
+    const footer = this.contentEl.createDiv({ cls: "chronoboard-modal-actions chronoboard-quick-action-footer" });
+    const cancelButton = footer.createEl("button", { text: "Cancel" });
+    cancelButton.addEventListener("click", () => this.close());
+    const saveButton = footer.createEl("button", { cls: "mod-cta", text: "Save changes" });
+    saveButton.addEventListener("click", async () => {
+      const invalidAction = this.actions.find((action) => !String(action.label || "").trim() || !String(action.target || "").trim());
+      if (invalidAction) {
+        new Notice("Each Linkbar button needs a label and a target.");
+        return;
+      }
+      this.plugin.settings.quickActions = this.actions.map((action) => ({
+        id: action.id || `quick-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        displayType: ["icon", "both"].includes(action.displayType) ? action.displayType : "text",
+        label: String(action.label || "").trim(),
+        icon: String(action.icon || "").trim(),
+        iconColor: String(action.iconColor || "").trim(),
+        actionType: action.actionType === "url" ? "url" : "note",
+        target: action.actionType === "url"
+          ? String(action.target || "").trim()
+          : this.plugin.normalizeQuickActionNoteTarget(action.target)
+      }));
+      await this.plugin.saveSettings();
+      await this.plugin.refreshAllViews();
+      this.close();
+    });
+  }
+
+  renderActions() {
+    this.noteSuggests.forEach((suggest) => suggest.destroy());
+    this.noteSuggests = [];
+    this.listEl.empty();
+    if (!this.actions.length) {
+      this.listEl.createDiv({
+        cls: "chronoboard-quick-action-empty",
+        text: "No Linkbar buttons are configured."
+      });
+      return;
+    }
+
+    this.actions.forEach((action, index) => {
+      const card = this.listEl.createDiv({ cls: "chronoboard-quick-action-editor" });
+      const header = card.createDiv({ cls: "chronoboard-quick-action-editor-head" });
+      header.createDiv({
+        cls: "chronoboard-quick-action-editor-title",
+        text: action.label || `Button ${index + 1}`
+      });
+      const controls = header.createDiv({ cls: "chronoboard-quick-action-editor-controls" });
+      const moveUp = controls.createEl("button", { cls: "clickable-icon" });
+      setIcon(moveUp, "arrow-up");
+      moveUp.disabled = index === 0;
+      moveUp.setAttr("aria-label", "Move button up");
+      moveUp.addEventListener("click", () => this.moveAction(index, -1));
+      const moveDown = controls.createEl("button", { cls: "clickable-icon" });
+      setIcon(moveDown, "arrow-down");
+      moveDown.disabled = index === this.actions.length - 1;
+      moveDown.setAttr("aria-label", "Move button down");
+      moveDown.addEventListener("click", () => this.moveAction(index, 1));
+      const remove = controls.createEl("button", { cls: "clickable-icon chronoboard-quick-action-remove" });
+      setIcon(remove, "trash-2");
+      remove.setAttr("aria-label", "Remove button");
+      remove.addEventListener("click", () => {
+        this.actions.splice(index, 1);
+        this.renderActions();
+      });
+
+      const fields = card.createDiv({ cls: "chronoboard-quick-action-fields" });
+      this.addSelectField(fields, "Display", action.displayType || "text", [
+        ["text", "Text"],
+        ["icon", "Icon"],
+        ["both", "Text & icon"]
+      ], (value) => {
+        action.displayType = value;
+        this.renderActions();
+      });
+      const labelInput = this.addTextField(fields, "Label", action.label || "", "Project notes", (value) => {
+        action.label = value;
+        header.querySelector(".chronoboard-quick-action-editor-title").setText(value || `Button ${index + 1}`);
+      });
+      if (action.id === this.focusActionId) {
+        window.setTimeout(() => {
+          labelInput.focus();
+          labelInput.select();
+        }, 0);
+        this.focusActionId = null;
+      }
+      this.addSelectField(fields, "Action", action.actionType || "note", [
+        ["note", "Open note"],
+        ["url", "Open URL"]
+      ], (value) => {
+        action.actionType = value;
+        this.renderActions();
+      });
+      const targetInput = this.addTextField(
+        fields,
+        action.actionType === "url" ? "URL" : "Note",
+        action.actionType === "url"
+          ? action.target || ""
+          : this.plugin.cleanQuickActionNoteTarget(action.target),
+        action.actionType === "url" ? "https://example.com" : "Find a note",
+        (value) => { action.target = value; }
+      );
+      if (action.actionType === "note") {
+        this.noteSuggests.push(new QuickActionNoteSuggest(this.app, targetInput, (value) => {
+          action.target = value;
+        }));
+      }
+      if (action.displayType === "icon" || action.displayType === "both") {
+        this.addIconField(fields, action, () => this.renderActions());
+      }
+    });
+  }
+
+  addTextField(container, label, value, placeholder, onInput) {
+    const field = container.createEl("label", { cls: "chronoboard-quick-action-field" });
+    field.createSpan({ text: label });
+    const input = field.createEl("input");
+    input.type = "text";
+    input.value = value;
+    input.placeholder = placeholder;
+    input.addEventListener("input", () => onInput(input.value));
+    return input;
+  }
+
+  addSelectField(container, label, value, options, onChange) {
+    const field = container.createEl("label", { cls: "chronoboard-quick-action-field" });
+    field.createSpan({ text: label });
+    const select = field.createEl("select");
+    options.forEach(([optionValue, optionLabel]) => {
+      const option = select.createEl("option", { text: optionLabel });
+      option.value = optionValue;
+      option.selected = optionValue === value;
+    });
+    select.addEventListener("change", () => onChange(select.value));
+  }
+
+  addIconField(container, action, onChange) {
+    const field = container.createEl("label", { cls: "chronoboard-quick-action-field" });
+    field.createSpan({ text: "Icon" });
+    const button = field.createEl("button", { cls: "chronoboard-quick-action-icon-select" });
+    const preview = button.createSpan({ cls: "chronoboard-quick-action-icon-select-preview" });
+    const visual = this.plugin.getQuickActionVisual(action);
+    setIcon(preview, visual.icon || (action.actionType === "url" ? "external-link" : "file"));
+    const color = visual.color;
+    if (color) {
+      preview.style.color = color;
+    }
+    button.createSpan({
+      text: action.icon
+        ? action.icon.replace(/^lucide-/, "")
+        : action.actionType === "url" ? "Link icon" : "Note icon"
+    });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      new QuickActionIconPickerModal(this.app, this.plugin, action, (icon, iconColor) => {
+        action.icon = icon;
+        action.iconColor = iconColor;
+        onChange();
+      }).open();
+    });
+  }
+
+  moveAction(index, offset) {
+    const nextIndex = index + offset;
+    if (nextIndex < 0 || nextIndex >= this.actions.length) {
+      return;
+    }
+    const [action] = this.actions.splice(index, 1);
+    this.actions.splice(nextIndex, 0, action);
+    this.renderActions();
+  }
+
+  onClose() {
+    this.noteSuggests.forEach((suggest) => suggest.destroy());
     this.contentEl.empty();
   }
 }
@@ -1393,6 +1926,75 @@ class ChronoboardSettingTab extends PluginSettingTab {
         text.inputEl.addClass("chronoboard-settings-hour-input");
       });
 
+    const toolbarSection = this.createSection(
+      containerEl,
+      "Linkbar Settings",
+      "Configure the optional Linkbar shown between the task count and the board controls."
+    );
+
+    new Setting(toolbarSection)
+      .setName("Show Linkbar")
+      .setDesc("Show the note and web link bar at the top of Chronoboard.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(Boolean(this.plugin.settings.quickActionBarEnabled))
+          .onChange(async (value) => {
+            this.plugin.settings.quickActionBarEnabled = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    new Setting(toolbarSection)
+      .setName("Scrollable Linkbar")
+      .setDesc("Keep each button at its natural width and allow horizontal scrolling.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(Boolean(this.plugin.settings.quickActionBarScrollable))
+          .onChange(async (value) => {
+            this.plugin.settings.quickActionBarScrollable = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    new Setting(toolbarSection)
+      .setName("Curved inner button corners")
+      .setDesc("Round each Linkbar button. Turn this off to use square corners between buttons.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(Boolean(this.plugin.settings.quickActionCurvedButtons))
+          .onChange(async (value) => {
+            this.plugin.settings.quickActionCurvedButtons = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    new Setting(toolbarSection)
+      .setName("Linkbar padding")
+      .setDesc("Set the space around and between Linkbar buttons.")
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, 5, 1)
+          .setDynamicTooltip()
+          .setValue(this.plugin.settings.quickActionBarPadding)
+          .onChange(async (value) => {
+            this.plugin.settings.quickActionBarPadding = value;
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+
+    new Setting(toolbarSection)
+      .setName("Linkbar buttons")
+      .setDesc("Add, edit, reorder, or remove Linkbar buttons.")
+      .addButton((button) =>
+        button
+          .setButtonText("Manage buttons")
+          .onClick(() => this.plugin.openQuickActionManager())
+      );
+
     const customizationSection = this.createSection(
       containerEl,
       "Customization Settings",
@@ -1720,7 +2322,12 @@ class ChronoboardView extends ItemView {
     this.contentEl.empty();
     this.contentEl.addClass("chronoboard-view");
     this.contentEl.classList.toggle("is-mobile", this.isMobileLayout());
-    this.contentEl.style.setProperty("--chronoboard-highlight", getHighlightCssValue(this.plugin.settings.highlightColor));
+    const highlightColor = normalizeHexColor(this.plugin.settings.highlightColor);
+    this.contentEl.style.setProperty("--chronoboard-highlight", getHighlightCssValue(highlightColor));
+    this.contentEl.style.setProperty(
+      "--chronoboard-highlight-text",
+      highlightColor ? getContrastTextColor(highlightColor) : "var(--text-on-accent)"
+    );
 
     const poolPaths = this.getSelectedPaths();
     const boardPaths = this.getBoardPaths();
@@ -1861,6 +2468,10 @@ class ChronoboardView extends ItemView {
       text: `${selectedTasks.length} selected task${selectedTasks.length === 1 ? "" : "s"}`
     });
 
+    if (this.plugin.settings.quickActionBarEnabled) {
+      this.renderQuickActionBar(toolbar);
+    }
+
     const right = toolbar.createDiv({ cls: "chronoboard-toolbar-group" });
 
     const exportButton = right.createEl("button", { cls: "chronoboard-toolbar-export-button" });
@@ -1917,7 +2528,10 @@ class ChronoboardView extends ItemView {
       await this.render();
     });
 
-    right.createDiv({ cls: "chronoboard-pill", text: this.getDateLabel() });
+    const dateLabel = this.getDateLabel();
+    const datePill = right.createDiv({ cls: "chronoboard-pill chronoboard-date-pill", text: dateLabel });
+    datePill.setAttr("title", dateLabel);
+    fitTextToWidth(datePill);
 
     const nextButton = right.createEl("button", { cls: "chronoboard-nav-button", text: ">" });
     nextButton.disabled = this.currentMode === "stats" && this.statsScope === "all";
@@ -1968,6 +2582,265 @@ class ChronoboardView extends ItemView {
     monthPill.addEventListener("click", async () => {
       this.currentMode = "month";
       await this.render();
+    });
+  }
+
+  renderQuickActionBar(toolbar) {
+    const actions = Array.isArray(this.plugin.settings.quickActions)
+      ? this.plugin.settings.quickActions
+      : [];
+    const bar = toolbar.createDiv({
+      cls: `chronoboard-quick-action-bar${this.plugin.settings.quickActionBarScrollable ? " is-scrollable" : ""}${this.plugin.settings.quickActionCurvedButtons ? " has-curved-buttons" : ""}`
+    });
+    const padding = clampNumber(Number(this.plugin.settings.quickActionBarPadding) || 0, 0, 5);
+    bar.style.setProperty("--chronoboard-quick-bar-padding", `${padding}px`);
+    const track = bar.createDiv({ cls: "chronoboard-quick-action-track" });
+    bar.addEventListener("contextmenu", (event) => {
+      this.openQuickActionContextMenu(event, null, this.getQuickActionInsertIndex(event, track));
+    });
+    if (!actions.length) {
+      const empty = track.createEl("button", {
+        cls: "chronoboard-quick-action-empty-button",
+        text: "Configure Linkbar"
+      });
+      empty.addEventListener("click", () => this.plugin.openQuickActionManager());
+      return;
+    }
+
+    actions.filter((action) => action && typeof action === "object").forEach((action, index) => {
+      if (!action.id) {
+        action.id = `quick-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
+      }
+      const label = String(action.label || "Linkbar action");
+      const visual = this.plugin.getQuickActionVisual(action);
+      const displayType = ["icon", "both"].includes(action.displayType) ? action.displayType : "text";
+      const button = track.createEl("button", {
+        cls: `chronoboard-quick-action-button is-${displayType}`
+      });
+      button.dataset.quickActionId = action.id;
+      button.setAttr("aria-label", label);
+      if (displayType === "icon" || displayType === "both") {
+        const icon = button.createSpan({ cls: "chronoboard-quick-action-icon" });
+        const fallbackIcon = action.actionType === "url" ? "external-link" : "file";
+        try {
+          setIcon(icon, visual.icon || fallbackIcon);
+        } catch (error) {
+          console.error("Chronoboard could not render a Linkbar icon.", error);
+          setIcon(icon, fallbackIcon);
+        }
+        if (visual.color) {
+          icon.style.color = visual.color;
+        }
+      }
+      if (displayType === "text" || displayType === "both") {
+        button.createSpan({ cls: "chronoboard-quick-action-label", text: label });
+      }
+      button.addEventListener("pointerdown", (event) => {
+        this.startQuickActionHold(event, action.id, button, track);
+      });
+      button.addEventListener("click", (event) => {
+        if (Date.now() < (this.quickActionClickBlockedUntil || 0)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        this.plugin.runQuickAction(action);
+      });
+      button.addEventListener("contextmenu", (event) => {
+        this.openQuickActionContextMenu(event, action, this.getQuickActionInsertIndex(event, track));
+      });
+    });
+  }
+
+  getQuickActionInsertIndex(event, track) {
+    const buttons = [...track.querySelectorAll(".chronoboard-quick-action-button")];
+    const index = buttons.findIndex((button) => {
+      const rect = button.getBoundingClientRect();
+      return event.clientX < rect.left + rect.width / 2;
+    });
+    return index < 0 ? buttons.length : index;
+  }
+
+  openQuickActionContextMenu(event, action, insertIndex) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeActiveContextMenu();
+    const menu = new Menu();
+    this.activeContextMenu = menu;
+    if (action) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Copy Link")
+          .setIcon("copy")
+          .onClick(() => this.plugin.copyQuickActionLink(action))
+      );
+    }
+    menu.addItem((item) =>
+      item
+        .setTitle("Edit Buttons")
+        .setIcon("settings-2")
+        .onClick(() => this.plugin.openQuickActionManager())
+    );
+    menu.addItem((item) =>
+      item
+        .setTitle("Add Button")
+        .setIcon("plus")
+        .onClick(() => this.plugin.openQuickActionManager({ addAtIndex: insertIndex }))
+    );
+    if (action) {
+      menu.addSeparator();
+      menu.addItem((item) =>
+        item
+          .setTitle("Remove Button")
+          .setIcon("trash")
+          .onClick(async () => {
+            this.plugin.settings.quickActions = this.plugin.settings.quickActions
+              .filter((candidate) => candidate.id !== action.id);
+            await this.plugin.saveSettings();
+            await this.plugin.refreshAllViews();
+          })
+      );
+    }
+    menu.showAtMouseEvent(event);
+    if (action) {
+      this.decorateActiveMenu("Remove Button");
+    }
+  }
+
+  startQuickActionHold(event, actionId, button, track) {
+    if (event.button !== 0) {
+      return;
+    }
+    this.quickActionHoldCleanup?.();
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let previousMoveX = startX;
+    let active = false;
+    let changed = false;
+
+    const cleanup = () => {
+      window.clearTimeout(holdTimer);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      window.removeEventListener("pointercancel", handleCancel);
+      button.removeClass("is-reordering");
+      track.removeClass("is-reordering");
+      if (this.quickActionHoldCleanup === cleanup) {
+        this.quickActionHoldCleanup = null;
+      }
+    };
+    const cancelBeforeActivation = () => {
+      this.quickActionClickBlockedUntil = Date.now() + 350;
+      cleanup();
+    };
+    const holdTimer = window.setTimeout(() => {
+      active = true;
+      this.quickActionClickBlockedUntil = Date.now() + 500;
+      button.addClass("is-reordering");
+      track.addClass("is-reordering");
+    }, 500);
+    const handleMove = (moveEvent) => {
+      if (moveEvent.pointerId !== pointerId) {
+        return;
+      }
+      if (!active) {
+        if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) > 6) {
+          cancelBeforeActivation();
+        }
+        return;
+      }
+      moveEvent.preventDefault();
+      const horizontalDelta = moveEvent.clientX - previousMoveX;
+      if (Math.abs(horizontalDelta) < 3) {
+        return;
+      }
+      previousMoveX = moveEvent.clientX;
+      const targetButton = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)
+        ?.closest(".chronoboard-quick-action-button");
+      if (!targetButton || targetButton === button || targetButton.parentElement !== track) {
+        return;
+      }
+      const targetId = targetButton.dataset.quickActionId;
+      const buttons = [...track.querySelectorAll(".chronoboard-quick-action-button")];
+      const draggedIndex = buttons.indexOf(button);
+      const targetIndex = buttons.indexOf(targetButton);
+      const movingRight = horizontalDelta > 0;
+      if ((movingRight && targetIndex < draggedIndex) || (!movingRight && targetIndex > draggedIndex)) {
+        return;
+      }
+      const placeAfter = movingRight;
+      changed = this.reorderQuickActionsLive(actionId, targetId, placeAfter, track, button, targetButton) || changed;
+    };
+    const handleEnd = async (endEvent) => {
+      if (endEvent.pointerId !== pointerId) {
+        return;
+      }
+      if (active) {
+        this.quickActionClickBlockedUntil = Date.now() + 350;
+      }
+      cleanup();
+      if (active && changed) {
+        await this.plugin.saveSettings();
+      }
+    };
+    const handleCancel = (cancelEvent) => {
+      if (cancelEvent.pointerId === pointerId) {
+        cancelBeforeActivation();
+      }
+    };
+
+    this.quickActionHoldCleanup = cleanup;
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleEnd);
+    window.addEventListener("pointercancel", handleCancel);
+  }
+
+  reorderQuickActionsLive(draggedId, targetId, placeAfter, track, draggedButton, targetButton) {
+    if ((placeAfter && draggedButton.previousElementSibling === targetButton)
+      || (!placeAfter && draggedButton.nextElementSibling === targetButton)) {
+      return false;
+    }
+    const actions = [...this.plugin.settings.quickActions];
+    const sourceIndex = actions.findIndex((action) => action.id === draggedId);
+    if (sourceIndex < 0) {
+      return false;
+    }
+    const [draggedAction] = actions.splice(sourceIndex, 1);
+    const targetIndex = actions.findIndex((action) => action.id === targetId);
+    if (targetIndex < 0) {
+      return false;
+    }
+    const previousRects = new Map(
+      [...track.querySelectorAll(".chronoboard-quick-action-button")]
+        .map((element) => [element, element.getBoundingClientRect()])
+    );
+    actions.splice(targetIndex + (placeAfter ? 1 : 0), 0, draggedAction);
+    this.plugin.settings.quickActions = actions;
+    if (placeAfter) {
+      targetButton.after(draggedButton);
+    } else {
+      targetButton.before(draggedButton);
+    }
+    this.animateQuickActionReflow(track, previousRects);
+    return true;
+  }
+
+  animateQuickActionReflow(track, previousRects) {
+    track.querySelectorAll(".chronoboard-quick-action-button").forEach((button) => {
+      const previousRect = previousRects.get(button);
+      if (!previousRect) {
+        return;
+      }
+      const currentRect = button.getBoundingClientRect();
+      const offsetX = previousRect.left - currentRect.left;
+      if (Math.abs(offsetX) < 1) {
+        return;
+      }
+      button.animate(
+        [{ transform: `translateX(${offsetX}px)` }, { transform: "translateX(0)" }],
+        { duration: 110, easing: "cubic-bezier(0.2, 0.9, 0.2, 1)" }
+      );
     });
   }
 
@@ -2647,7 +3520,8 @@ class ChronoboardView extends ItemView {
           if (!start) {
             return false;
           }
-          return !period.start || (!start.isBefore(period.start) && !start.isAfter(period.end));
+          const isInPeriod = !period.start || (!start.isBefore(period.start) && !start.isAfter(period.end));
+          return isInPeriod && this.entryMinutes(entry) > 0;
         });
         return {
           task,
@@ -2919,17 +3793,29 @@ class ChronoboardView extends ItemView {
         const content = row.createDiv({ cls: "chronoboard-stats-task-content" });
         const taskHead = content.createDiv({ cls: "chronoboard-stats-task-head" });
         const name = taskHead.createDiv({ cls: "chronoboard-stats-task-name" });
-        name.createDiv({ cls: "chronoboard-task-key", text: item.task.jiraKey || item.task.file.basename });
+        const taskKey = name.createDiv({
+          cls: "chronoboard-task-key chronoboard-stats-task-key",
+          text: item.task.jiraKey || item.task.file.basename
+        });
+        const taskColor = normalizeHexColor(item.task.color);
+        if (taskColor) {
+          taskKey.addClass("has-task-color");
+          taskKey.style.background = taskColor;
+          taskKey.style.color = getContrastTextColor(taskColor);
+        }
         const secondaryText = this.plugin.getTaskSecondaryText(item.task);
         if (secondaryText) {
           name.createDiv({ cls: "chronoboard-task-name", text: secondaryText });
         }
         taskHead.createDiv({ cls: "chronoboard-stats-task-hours", text: formatHours(item.minutes) });
         const meter = content.createDiv({ cls: "chronoboard-stats-task-meter" });
-        meter.createDiv({
+        const meterFill = meter.createDiv({
           cls: "chronoboard-stats-task-meter-fill",
           attr: { style: `width:${totalMinutes ? Math.max((item.minutes / totalMinutes) * 100, 1) : 0}%` }
         });
+        if (taskColor) {
+          meterFill.style.background = taskColor;
+        }
         const meta = content.createDiv({ cls: "chronoboard-stats-task-meta" });
         const share = totalMinutes ? Math.round((item.minutes / totalMinutes) * 100) : 0;
         meta.createSpan({ text: `${item.blockCount} block${item.blockCount === 1 ? "" : "s"}` });
@@ -3082,6 +3968,14 @@ class ChronoboardView extends ItemView {
             await this.app.workspace.getLeaf("tab").openFile(task.file);
           })
       );
+      if (this.plugin.settings.quickActionBarEnabled) {
+        menu.addItem((item) =>
+          item
+            .setTitle("Add Task to Linkbar")
+            .setIcon("panel-top")
+            .onClick(() => this.plugin.addTaskToQuickActionBar(task))
+        );
+      }
       menu.addItem((item) =>
         item
           .setTitle("Change color")
@@ -3341,6 +4235,14 @@ class ChronoboardView extends ItemView {
           await this.app.workspace.getLeaf("tab").openFile(task.file);
         })
     );
+    if (this.plugin.settings.quickActionBarEnabled) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Add Task to Linkbar")
+          .setIcon("panel-top")
+          .onClick(() => this.plugin.addTaskToQuickActionBar(task))
+      );
+    }
     menu.addItem((item) =>
       item
         .setTitle("Change color")
@@ -3918,6 +4820,12 @@ module.exports = class ChronoboardPlugin extends Plugin {
     });
 
     this.addCommand({
+      id: "manage-chronoboard-toolbar",
+      name: "Manage Linkbar buttons",
+      callback: () => this.openQuickActionManager()
+    });
+
+    this.addCommand({
       id: "open-selected-chronoboard-task",
       name: "Open selected Chronoboard task",
       checkCallback: (checking) => {
@@ -3977,6 +4885,13 @@ module.exports = class ChronoboardPlugin extends Plugin {
     this.settings.highlightColor = normalizeHexColor(this.settings.highlightColor);
     this.settings.heatmapLowColor = normalizeHexColor(this.settings.heatmapLowColor) || DEFAULT_SETTINGS.heatmapLowColor;
     this.settings.heatmapHighColor = normalizeHexColor(this.settings.heatmapHighColor) || DEFAULT_SETTINGS.heatmapHighColor;
+    this.settings.quickActions = Array.isArray(this.settings.quickActions) ? this.settings.quickActions : [];
+    const linkbarPadding = Number(this.settings.quickActionBarPadding);
+    this.settings.quickActionBarPadding = clampNumber(
+      Number.isFinite(linkbarPadding) ? linkbarPadding : DEFAULT_SETTINGS.quickActionBarPadding,
+      0,
+      5
+    );
   }
 
   async saveSettings(options = {}) {
@@ -4219,6 +5134,164 @@ module.exports = class ChronoboardPlugin extends Plugin {
     new ChronoboardGuideModal(this.app, this).open();
   }
 
+  openQuickActionManager(options = {}) {
+    new QuickActionManagerModal(this.app, this, options).open();
+  }
+
+  getQuickActionCopyText(action) {
+    if (action.actionType === "url") {
+      return String(action.target || "").trim();
+    }
+    const linkText = this.cleanQuickActionNoteTarget(action.target);
+    const hashIndex = linkText.indexOf("#");
+    const subpath = hashIndex >= 0 ? linkText.slice(hashIndex) : "";
+    const file = this.getQuickActionNoteFile(action.target);
+    const noteName = file instanceof TFile
+      ? file.basename
+      : linkText.slice(0, hashIndex >= 0 ? hashIndex : undefined).split("/").pop();
+    return this.normalizeQuickActionNoteTarget(`${noteName || linkText}${subpath}`);
+  }
+
+  async copyQuickActionLink(action) {
+    const value = this.getQuickActionCopyText(action);
+    if (!value) {
+      new Notice("This Linkbar button does not have a link to copy.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      new Notice("Link copied.");
+    } catch (error) {
+      console.error("Chronoboard could not copy the Linkbar address.", error);
+      new Notice("Chronoboard could not copy the link.");
+    }
+  }
+
+  async addTaskToQuickActionBar(task) {
+    if (!this.settings.quickActionBarEnabled || !(task?.file instanceof TFile)) {
+      return;
+    }
+    const exists = this.settings.quickActions.some((action) =>
+      action.actionType === "note" && this.getQuickActionNoteFile(action.target)?.path === task.file.path
+    );
+    if (exists) {
+      new Notice("This task is already on the Linkbar.");
+      return;
+    }
+    this.settings.quickActions.push({
+      id: `quick-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      displayType: "text",
+      label: this.getTaskLabel(task),
+      icon: "",
+      iconColor: "",
+      actionType: "note",
+      target: this.normalizeQuickActionNoteTarget(task.file.basename)
+    });
+    await this.saveSettings();
+    await this.refreshAllViews();
+    new Notice("Task added to the Linkbar.");
+  }
+
+  cleanQuickActionNoteTarget(target) {
+    return String(target || "")
+      .trim()
+      .replace(/^\[\[/, "")
+      .replace(/\]\]$/, "")
+      .split("|")[0]
+      .trim();
+  }
+
+  normalizeQuickActionNoteTarget(target) {
+    const value = String(target || "").trim();
+    if (!value) {
+      return "";
+    }
+    const linkText = value.replace(/^\[\[/, "").replace(/\]\]$/, "").trim();
+    return `[[${linkText}]]`;
+  }
+
+  getQuickActionNoteFile(target) {
+    const linkText = this.cleanQuickActionNoteTarget(target);
+    const filePath = linkText.split("#")[0];
+    const exactPath = filePath.endsWith(".md") ? filePath : `${filePath}.md`;
+    const exactFile = this.app.vault.getAbstractFileByPath(filePath)
+      || this.app.vault.getAbstractFileByPath(exactPath);
+    if (exactFile instanceof TFile) {
+      return exactFile;
+    }
+    return this.app.metadataCache.getFirstLinkpathDest(filePath, "");
+  }
+
+  getQuickActionVisual(action) {
+    if (action.icon) {
+      return { icon: action.icon, color: getIconicCssColor(action.iconColor) };
+    }
+    if (action.actionType !== "note") {
+      return { icon: "external-link", color: getIconicCssColor(action.iconColor) };
+    }
+    const file = this.getQuickActionNoteFile(action.target);
+    const iconic = this.app.plugins?.plugins?.iconic;
+    if (file instanceof TFile && iconic && typeof iconic.getFileItem === "function") {
+      try {
+        const item = iconic.getFileItem(file.path);
+        return {
+          icon: item?.icon || item?.iconDefault || "file",
+          color: getIconicCssColor(action.iconColor) || getIconicCssColor(item?.color)
+        };
+      } catch (error) {
+        console.error("Chronoboard could not read the Iconic note icon.", error);
+      }
+    }
+    return { icon: "file", color: getIconicCssColor(action.iconColor) };
+  }
+
+  getOpenLeafForFile(file) {
+    let matchingLeaf = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (matchingLeaf) {
+        return;
+      }
+      const openPath = leaf.view?.file?.path || leaf.getViewState?.().state?.file;
+      if (openPath === file.path) {
+        matchingLeaf = leaf;
+      }
+    });
+    return matchingLeaf;
+  }
+
+  async runQuickAction(action) {
+    if (action.actionType === "url") {
+      const target = String(action.target || "").trim();
+      if (!/^https?:\/\//i.test(target)) {
+        new Notice("Enter a complete http or https URL for this Linkbar button.");
+        return;
+      }
+      window.open(target, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const file = this.getQuickActionNoteFile(action.target);
+    if (!(file instanceof TFile)) {
+      new Notice(`Chronoboard could not find ${action.target}.`);
+      return;
+    }
+    const linkText = this.cleanQuickActionNoteTarget(action.target);
+    const openLeaf = this.getOpenLeafForFile(file);
+    if (openLeaf) {
+      await this.app.workspace.revealLeaf(openLeaf);
+      if (linkText.includes("#")) {
+        await this.app.workspace.openLinkText(linkText, file.path, false);
+      }
+      return;
+    }
+    if (linkText.includes("#")) {
+      await this.app.workspace.openLinkText(linkText, "", false);
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.openFile(file);
+  }
+
   buildGuideContent() {
     return [
       "> [!info] What Chronoboard Is",
@@ -4280,6 +5353,7 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "- `Add task to Chronoboard`",
       "- `Open manual time entry`",
       "- `Export tracked time as CSV`",
+      "- `Manage Linkbar buttons`",
       "- `Open selected Chronoboard task`",
       "- `Open Chronoboard guide`",
       "- `Add TaskNotes fields to current task`",
@@ -4292,6 +5366,10 @@ module.exports = class ChronoboardPlugin extends Plugin {
       "- `Metadata property`: changes which frontmatter property Chronoboard uses to filter available tasks.",
       "- `Excluded values`: values that hide tasks from the add-task pool. By default this includes `finished`.",
       "- `Always include tasks`: allows generic or static tasks, such as meetings, to stay available even without the main status property.",
+      "- `Show Linkbar`: shows the configurable note and web link bar.",
+      "- `Scrollable Linkbar`: keeps Linkbar buttons at their natural width and enables horizontal scrolling.",
+      "- `Curved inner button corners`: rounds each Linkbar button instead of using square corners between buttons.",
+      "- `Linkbar padding`: changes the space around and between Linkbar buttons.",
       "- `Hide weekends in week and month views`: hides Saturday and Sunday from those timeline views.",
       "- `Visible start hour` and `Visible end hour`: control the working-day window shown in day and week views.",
       "- `Highlight color`: changes the accent color used by Chronoboard controls.",

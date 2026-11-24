@@ -1,5 +1,31 @@
 # Chronoboard Changelog
 
+## 0.8.6
+
+### Added
+
+- Added a configurable Linkbar for note and web link buttons.
+- Added text, icon, and text-with-icon button displays.
+- Added note search, an icon picker, icon colors, and automatic Iconic note icons.
+- Added Linkbar button reordering by hold and drag.
+- Added Linkbar context actions to copy, edit, insert, and remove buttons.
+- Added task and time-block actions that add a task to the Linkbar.
+- Added settings for scrolling, curved button corners, and Linkbar padding.
+
+### Changed
+
+- Linkbar note buttons now use an open note tab when one is available.
+- The date control now has a fixed width and reduces long text to fit.
+- Linkbar padding now controls equal outer spacing and button spacing without changing the Linkbar height.
+
+### Fixed
+
+- Active buttons now use readable text with light custom highlight colors.
+- Highest-hour task labels now keep each task color.
+- Note search results now support pointer and keyboard selection above the button manager.
+- Removed duplicate Linkbar hover labels.
+- Removed unsupported scrollbar properties and unnecessary `!important` style overrides.
+
 ## 0.8.5
 
 ### Fixed

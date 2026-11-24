@@ -14,6 +14,8 @@ It turns Markdown tasks into draggable time blocks across day, week, and month v
 - Supports dedicated time entry notes for individual blocks
 - Tracks scoped totals for day, week, and month
 - Exports selected tasks and date ranges to CSV
+- Shows configurable note and web links in the Linkbar
+- Shows activity statistics and calendar heatmaps for multiple time ranges
 - Keeps task references valid when task notes or their folders move
 - Shows a green confirmation after Chronoboard saves the final edit in a group
 - Keeps the data portable because the source of truth remains Markdown

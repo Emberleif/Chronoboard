@@ -14,6 +14,7 @@
   padding: 10px 12px;
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
+  min-width: 0;
 }
 
 .chronoboard-toolbar-group {
@@ -21,6 +22,315 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.chronoboard-quick-action-bar {
+  --chronoboard-quick-bar-radius: 12px;
+  --chronoboard-quick-bar-padding: 3px;
+  --chronoboard-quick-bar-gap: calc(var(--chronoboard-quick-bar-padding) + 1px);
+  flex: 1 1 0;
+  position: relative;
+  box-sizing: border-box;
+  min-width: 80px;
+  height: 34px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, black);
+  border-radius: var(--chronoboard-quick-bar-radius);
+  background: color-mix(in srgb, var(--background-primary) 82%, black);
+  box-shadow:
+    inset 0 0 3px rgba(0, 0, 0, 0.38),
+    0 1px 0 color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+}
+
+.chronoboard-quick-action-bar.is-scrollable {
+  overflow: hidden;
+}
+
+.chronoboard-quick-action-bar.is-scrollable .chronoboard-quick-action-track::-webkit-scrollbar {
+  height: 2px;
+}
+
+.chronoboard-quick-action-bar.is-scrollable .chronoboard-quick-action-track::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--background-modifier-border-hover);
+}
+
+.chronoboard-quick-action-track {
+  position: absolute;
+  inset: var(--chronoboard-quick-bar-padding);
+  display: flex;
+  box-sizing: border-box;
+  align-items: stretch;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chronoboard-quick-action-bar.is-scrollable .chronoboard-quick-action-track {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.chronoboard-quick-action-button,
+.chronoboard-quick-action-empty-button {
+  display: inline-flex;
+  box-sizing: border-box;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  margin: 0;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--background-secondary) 88%, black);
+  background-image: none;
+  color: var(--text-muted);
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chronoboard-quick-action-button + .chronoboard-quick-action-button {
+  margin-left: var(--chronoboard-quick-bar-padding);
+}
+
+.chronoboard-quick-action-track > :first-child {
+  border-top-left-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+  border-bottom-left-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+}
+
+.chronoboard-quick-action-bar:not(.is-scrollable) .chronoboard-quick-action-track > :last-child {
+  border-top-right-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+  border-bottom-right-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+}
+
+.chronoboard-quick-action-empty-button {
+  border-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+}
+
+.chronoboard-quick-action-bar.has-curved-buttons .chronoboard-quick-action-button {
+  border-radius: max(0px, calc(var(--chronoboard-quick-bar-radius) - var(--chronoboard-quick-bar-gap)));
+}
+
+.chronoboard-quick-action-button {
+  cursor: pointer;
+  user-select: none;
+}
+
+.chronoboard-quick-action-track.is-reordering,
+.chronoboard-quick-action-track.is-reordering .chronoboard-quick-action-button {
+  cursor: grabbing;
+}
+
+.chronoboard-quick-action-button.is-reordering {
+  z-index: 1;
+  background: var(--background-modifier-hover);
+}
+
+.chronoboard-quick-action-bar.is-scrollable .chronoboard-quick-action-button {
+  flex: 0 0 auto;
+  min-width: 34px;
+  max-width: none;
+}
+
+.chronoboard-quick-action-button.is-icon {
+  flex: 0 0 34px;
+  width: 34px;
+  padding: 0;
+}
+
+.chronoboard-quick-action-button.is-both {
+  gap: 6px;
+}
+
+.chronoboard-quick-action-button:hover,
+.chronoboard-quick-action-empty-button:hover {
+  border-color: var(--background-modifier-border-hover);
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.chronoboard-quick-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chronoboard-quick-action-icon,
+.chronoboard-quick-action-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.chronoboard-note-suggest-name {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.chronoboard-note-suggest-container {
+  position: fixed;
+  max-height: min(320px, 55vh);
+  overflow-y: auto;
+}
+
+.chronoboard-note-suggest-path {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chronoboard-icon-picker-modal {
+  width: min(680px, calc(100vw - 32px));
+  max-width: 680px;
+}
+
+.chronoboard-icon-picker-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.chronoboard-icon-picker-automatic-help {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.25;
+}
+
+.chronoboard-icon-picker-preview {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.chronoboard-icon-picker-preview svg {
+  width: 22px;
+  height: 22px;
+}
+
+.chronoboard-icon-picker-search {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.chronoboard-icon-picker-colors {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.chronoboard-icon-picker-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.chronoboard-icon-color-swatches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chronoboard-icon-color-swatch {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--chronoboard-swatch-color, var(--background-modifier-hover));
+}
+
+.chronoboard-icon-color-swatch.is-selected {
+  border-color: var(--text-normal);
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+
+.chronoboard-icon-color-swatch svg {
+  width: 13px;
+  height: 13px;
+}
+
+.chronoboard-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 5px;
+  max-height: min(48vh, 430px);
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary-alt);
+}
+
+.chronoboard-icon-picker-button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 38px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.chronoboard-icon-picker-button.is-selected {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.chronoboard-icon-picker-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.chronoboard-icon-picker-empty {
+  grid-column: 1 / -1;
+  padding: 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.chronoboard-quick-action-icon-select {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+}
+
+.chronoboard-quick-action-icon-select-preview,
+.chronoboard-quick-action-icon-select-preview svg {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.chronoboard-quick-action-icon-select span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chronoboard-title {
@@ -44,8 +354,19 @@
 
 .chronoboard-pill.is-active {
   background: var(--chronoboard-highlight, var(--interactive-accent));
-  color: var(--text-on-accent);
+  color: var(--chronoboard-highlight-text, var(--text-on-accent));
   border-color: var(--chronoboard-highlight, var(--interactive-accent));
+}
+
+.chronoboard-date-pill {
+  box-sizing: border-box;
+  flex: 0 0 152px;
+  width: 152px;
+  min-width: 152px;
+  max-width: 152px;
+  overflow: hidden;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .chronoboard-layout {
@@ -310,7 +631,7 @@
 .chronoboard-toolbar-state-button.is-active {
   border-color: var(--chronoboard-highlight, var(--interactive-accent));
   background: var(--chronoboard-highlight, var(--interactive-accent));
-  color: var(--text-on-accent);
+  color: var(--chronoboard-highlight-text, var(--text-on-accent));
 }
 
 .chronoboard-toolbar-export-button {
@@ -467,8 +788,6 @@
   min-height: 0;
   height: 100%;
   overscroll-behavior: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
 }
 
 .chronoboard-week-hours::-webkit-scrollbar {
@@ -545,8 +864,6 @@
   border-bottom: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   border-left: 1px solid var(--background-modifier-border);
-  scrollbar-width: none;
-  -ms-overflow-style: none;
 }
 
 .chronoboard-day-hours-head::-webkit-scrollbar {
@@ -628,6 +945,99 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
+}
+
+.chronoboard-quick-action-modal {
+  width: min(860px, calc(100vw - 32px));
+  max-width: 860px;
+}
+
+.chronoboard-quick-action-intro {
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.chronoboard-quick-action-top {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.chronoboard-quick-action-list {
+  display: grid;
+  gap: 10px;
+  max-height: min(58vh, 650px);
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.chronoboard-quick-action-editor {
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: var(--background-secondary);
+}
+
+.chronoboard-quick-action-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.chronoboard-quick-action-editor-title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chronoboard-quick-action-editor-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.chronoboard-quick-action-remove {
+  color: var(--text-error);
+}
+
+.chronoboard-quick-action-fields {
+  display: grid;
+  grid-template-columns: 110px minmax(130px, 1fr) 120px minmax(180px, 1.4fr) minmax(150px, 1fr);
+  gap: 10px;
+}
+
+.chronoboard-quick-action-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.chronoboard-quick-action-field input,
+.chronoboard-quick-action-field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.chronoboard-quick-action-empty {
+  padding: 28px 16px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 9px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.chronoboard-quick-action-footer {
+  position: sticky;
+  bottom: 0;
+  padding-top: 12px;
+  background: var(--background-primary);
 }
 
 .chronoboard-modal-textarea {
@@ -751,15 +1161,15 @@
   flex: 0 0 auto;
 }
 
-.chronoboard-export-modal .setting-item {
-  border: 0 !important;
-  box-shadow: none !important;
-  background-image: none !important;
+.modal.chronoboard-export-modal .modal-content .setting-item {
+  border: 0;
+  box-shadow: none;
+  background-image: none;
 }
 
-.chronoboard-export-modal .setting-item::before,
-.chronoboard-export-modal .setting-item::after {
-  display: none !important;
+.modal.chronoboard-export-modal .modal-content .setting-item::before,
+.modal.chronoboard-export-modal .modal-content .setting-item::after {
+  display: none;
 }
 
 .chronoboard-export-section-head {
@@ -1022,18 +1432,18 @@
   padding: 0 8px;
 }
 
-.chronoboard-stats-scope-button {
+.chronoboard-stats-scope-head button.chronoboard-stats-scope-button {
   width: 28px;
   height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 0 !important;
+  border: 0;
   border-radius: 0;
-  background: transparent !important;
+  background: transparent;
   color: var(--text-muted);
-  box-shadow: none !important;
+  box-shadow: none;
   cursor: pointer;
 }
 
@@ -1041,8 +1451,8 @@
   justify-self: end;
 }
 
-.chronoboard-stats-scope-button:hover:not(:disabled) {
-  background: transparent !important;
+.chronoboard-stats-scope-head button.chronoboard-stats-scope-button:hover:not(:disabled) {
+  background: transparent;
   color: var(--text-normal);
 }
 
@@ -1751,6 +2161,16 @@
   min-width: 0;
 }
 
+.chronoboard-stats-task-key.has-task-color {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chronoboard-stats-task-rank {
   width: 24px;
   height: 24px;
@@ -1883,7 +2303,7 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal {
   width: min(680px, calc(100vw - 40px));
   max-width: 680px;
   max-height: min(720px, calc(100vh - 96px));
-  top: auto !important;
+  top: auto;
   margin: 0;
   border: 1px solid var(--background-modifier-border);
   border-radius: 12px;
@@ -1923,7 +2343,7 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal > * {
   padding-right: 36px;
 }
 
-.chronoboard-task-picker-close {
+.chronoboard-task-picker-search button.chronoboard-task-picker-close {
   position: absolute;
   top: 14px;
   right: 14px;
@@ -1934,17 +2354,17 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal > * {
   align-items: center;
   justify-content: center;
   padding: 3px;
-  border: 0 !important;
+  border: 0;
   border-radius: 4px;
-  background: transparent !important;
+  background: transparent;
   color: var(--text-muted);
-  box-shadow: none !important;
+  box-shadow: none;
   cursor: pointer;
 }
 
-.chronoboard-task-picker-close:hover,
-.chronoboard-task-picker-close:focus-visible {
-  background: var(--background-modifier-hover) !important;
+.chronoboard-task-picker-search button.chronoboard-task-picker-close:hover,
+.chronoboard-task-picker-search button.chronoboard-task-picker-close:focus-visible {
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
   outline: none;
 }
@@ -1982,15 +2402,15 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal > * {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--chronoboard-highlight, var(--interactive-accent)) 25%, transparent);
 }
 
-.chronoboard-task-picker-modal .prompt-results {
+.modal-container.chronoboard-task-picker-modal .prompt-results {
   margin: 0;
-  padding: 0 36px 28px !important;
-  border-top: 0 !important;
+  padding: 0 36px 28px;
+  border-top: 0;
 }
 
-.chronoboard-task-picker-modal .suggestion-container {
+.modal-container.chronoboard-task-picker-modal .suggestion-container {
   margin: 0;
-  padding: 0 !important;
+  padding: 0;
 }
 
 .chronoboard-task-picker-modal .suggestion-item {
@@ -2057,6 +2477,10 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal > * {
     border-left: 0;
     border-top: 1px solid var(--background-modifier-border);
   }
+
+  .chronoboard-quick-action-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .chronoboard-toolbar.is-mobile {
@@ -2065,6 +2489,12 @@ body:not(.is-mobile) .prompt.chronoboard-task-picker-modal > * {
 }
 
 .chronoboard-toolbar.is-mobile .chronoboard-toolbar-group {
+  width: 100%;
+}
+
+.chronoboard-toolbar.is-mobile .chronoboard-quick-action-bar {
+  box-sizing: border-box;
+  flex-basis: auto;
   width: 100%;
 }
 
